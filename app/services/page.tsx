@@ -1,0 +1,26 @@
+import Image from "next/image";
+import Link from "next/link";
+import { SectionHeading } from "@/components/section-heading";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { services } from "@/lib/data";
+
+export default function ServicesPage() {
+  return (
+    <section className="container py-12">
+      <SectionHeading eyebrow="Services" title="Technology Services in Nairobi" description="Professional CCTV installation, live streaming, computer repair, and networking services." />
+      <div className="grid gap-6 md:grid-cols-2">
+        {services.map((service) => (
+          <Card key={service.slug} className="overflow-hidden">
+            <div className="relative aspect-[16/9]"><Image src={service.image} alt={service.title} fill className="object-cover" sizes="50vw" /></div>
+            <CardContent className="space-y-4 p-6">
+              <h2 className="text-2xl font-bold">{service.title}</h2>
+              <p className="text-muted-foreground">{service.summary}</p>
+              <Button asChild><Link href={`/services/${service.slug}`}>View Packages</Link></Button>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </section>
+  );
+}
