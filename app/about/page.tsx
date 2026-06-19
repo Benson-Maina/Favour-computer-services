@@ -1,9 +1,10 @@
 import { CheckCircle2 } from "lucide-react";
 import { SectionHeading } from "@/components/section-heading";
 import { Card, CardContent } from "@/components/ui/card";
-import { business } from "@/lib/data";
+import { getBusinessSettings } from "@/lib/data";
 
-export default function AboutPage() {
+export default async function AboutPage() {
+  const business = await getBusinessSettings();
   return (
     <section className="container py-12">
       <SectionHeading eyebrow="About" title="Favour Computer Services" description="A Nairobi technology partner for genuine electronics, practical advice, and dependable installation services." />

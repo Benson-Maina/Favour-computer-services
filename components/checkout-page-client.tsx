@@ -11,13 +11,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useCart } from "@/lib/cart-context";
-import { saveStoredOrder } from "@/lib/orders-storage";
 import { formatCurrency } from "@/lib/utils";
-import { business } from "@/lib/data";
+import type { BusinessSettings } from "@/lib/data";
 
 type State = { ok: boolean; message: string; orderId?: string };
 
-export function CheckoutPageClient() {
+export function CheckoutPageClient({ business }: { business: BusinessSettings }) {
   const router = useRouter();
   const { items, subtotal, hydrated, clearCart } = useCart();
   const orderId = useMemo(() => crypto.randomUUID(), []);
@@ -31,22 +30,6 @@ export function CheckoutPageClient() {
       return;
     }
 
-    // Use customer data returned from server action instead of trying to extract from FormData
-    saveStoredOrder({
-      id: state.orderId ?? orderId,
-      customerName: state.customerName ?? "",
-      customerEmail: state.customerEmail ?? "",
-      customerPhone: state.customerPhone ?? "",
-      deliveryMethod: state.deliveryMethod ?? "pickup",
-      shippingAddress: state.shippingAddress ?? "",
-      notes: state.notes ?? "",
-      paymentReference: state.paymentReference ?? "",
-      paymentStatus: "Payment Submitted",
-      status: "Payment Submitted",
-      items,
-      total: subtotal,
-      createdAt: new Date().toISOString()
-    });
     toast.success("Order placed successfully");
     clearCart();
     router.push("/account/orders");

@@ -41,6 +41,8 @@ type DashboardProps = {
   bookings: Booking[];
   inventoryAlerts: InventoryAlert[];
   activities: AdminActivity[];
+  blogPosts: { id: string; title: string; published: boolean; draft: boolean; scheduledAt: string; category: string }[];
+  contactInquiryCount: number;
 };
 
 const widgetIcons = [TrendingUp, ShoppingBag, AlertTriangle, Boxes, CheckCircle2, AlertTriangle, Boxes, AlertTriangle, AlertTriangle, Users];
@@ -57,7 +59,9 @@ export function AdminDashboard({
   paymentLogs,
   bookings,
   inventoryAlerts,
-  activities
+  activities,
+  blogPosts,
+  contactInquiryCount
 }: DashboardProps) {
   const widgets = [
     ["Total Revenue", formatCurrency(metrics.totalRevenue)],
@@ -306,6 +310,7 @@ export function AdminDashboard({
               <Textarea name="description" defaultValue={productForm.description} placeholder="Description" />
               <Textarea name="specifications" defaultValue={JSON.stringify(productForm.specs, null, 2)} placeholder="Specifications JSON" />
               <Input name="images" defaultValue={productForm.images.join("\n")} placeholder="Supabase Storage image URLs" />
+              <Input name="productImages" type="file" accept="image/jpeg,image/png,image/webp" multiple />
               <div className="grid gap-3 sm:grid-cols-3">
                 <Input name="costPrice" type="number" defaultValue={productForm.costPrice} placeholder="Cost" />
                 <Input name="price" type="number" defaultValue={productForm.price} />
@@ -366,12 +371,16 @@ export function AdminDashboard({
               <h2 className="text-xl font-bold">Blog CMS</h2>
             </div>
             <div className="space-y-3">
-              {["Draft buying guide", "Scheduled CCTV checklist", "SEO metadata review", "Tags and categories"].map((item) => (
-                <div key={item} className="rounded-md border p-3">
-                  <p className="font-semibold">{item}</p>
-                  <p className="text-sm text-muted-foreground">Rich text, draft workflow, scheduling, tags, categories, and SEO fields.</p>
+              {blogPosts.length ? blogPosts.map((post) => (
+                <div key={post.id} className="rounded-md border p-3">
+                  <p className="font-semibold">{post.title}</p>
+                  <p className="text-sm text-muted-foreground">{post.category || "Uncategorized"} Â· {post.published ? "Published" : post.scheduledAt ? "Scheduled" : post.draft ? "Draft" : "Unpublished"}</p>
                 </div>
-              ))}
+              )) : <EmptyState title="No blog posts yet." />}
+              <div className="rounded-md border p-3">
+                <p className="font-semibold">Contact inquiries</p>
+                <p className="text-sm text-muted-foreground">{contactInquiryCount} submissions in Supabase</p>
+              </div>
             </div>
           </CardContent>
         </Card>

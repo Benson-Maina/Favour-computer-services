@@ -5,11 +5,19 @@ import Link from "next/link";
 import { Search, TrendingUp, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { products, recentSearches, searchSuggestions, trendingProducts } from "@/lib/data";
+import type { Product } from "@/lib/types";
 
-export function SearchPanel() {
+export function SearchPanel({ products }: { products: Product[] }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const searchSuggestions = useMemo(() => {
+    const counts = new Map<string, number>();
+    products.forEach((product) => {
+      [product.name, product.brand, product.category].filter(Boolean).forEach((term) => counts.set(term, (counts.get(term) ?? 0) + 1));
+    });
+    return Array.from(counts, ([term, count]) => ({ term, count })).sort((a, b) => b.count - a.count);
+  }, [products]);
+  const trendingProducts = useMemo(() => products.filter((product) => product.bestSelling || product.featured).map((product) => product.name), [products]);
   const matches = useMemo(() => {
     const term = query.toLowerCase();
     return products
@@ -42,7 +50,7 @@ export function SearchPanel() {
             <div>
               <p className="mb-2 text-xs font-bold uppercase text-muted-foreground">Recent</p>
               <div className="space-y-2">
-                {recentSearches.slice(0, 4).map((term) => (
+                {products.slice(0, 4).map((product) => product.name).map((term) => (
                   <Link key={term} href={`/shop?q=${encodeURIComponent(term)}`} className="block rounded-md px-2 py-1 text-sm hover:bg-secondary">{term}</Link>
                 ))}
               </div>

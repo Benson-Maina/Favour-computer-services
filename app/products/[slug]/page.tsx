@@ -8,16 +8,17 @@ import { ProductCard } from "@/components/product-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { business, products } from "@/lib/data";
+import { getBusinessSettings, getProductBySlug, getProductReviews, getProducts } from "@/lib/data";
 import { formatCurrency, whatsappUrl } from "@/lib/utils";
 
-export function generateStaticParams() {
+export async function generateStaticParams() {
+  const products = await getProducts();
   return products.map((product) => ({ slug: product.slug }));
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
-  const product = products.find((item) => item.slug === slug);
+  const [business, product] = await Promise.all([getBusinessSettings(), getProductBySlug(slug)]);
   if (!product) return {};
   return {
     title: product.name,
@@ -29,9 +30,11 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
 export default async function ProductPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const product = products.find((item) => item.slug === slug);
+  const [business, product, products] = await Promise.all([getBusinessSettings(), getProductBySlug(slug), getProducts()]);
   if (!product) notFound();
+  const reviews = await getProductReviews(product.id);
   const related = products.filter((item) => item.category === product.category && item.id !== product.id).slice(0, 4);
+  const images = product.images.filter(Boolean);
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "Product",
@@ -58,10 +61,10 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
       <div className="grid gap-10 lg:grid-cols-2">
         <div className="space-y-4">
           <div className="relative aspect-square overflow-hidden rounded-lg border bg-secondary">
-            <Image priority src={product.images[0]} alt={product.name} fill className="object-cover transition-transform duration-300 hover:scale-110" sizes="(max-width: 1024px) 100vw, 50vw" />
+            {images[0] ? <Image priority src={images[0]} alt={product.name} fill className="object-cover transition-transform duration-300 hover:scale-110" sizes="(max-width: 1024px) 100vw, 50vw" /> : null}
           </div>
           <div className="grid grid-cols-4 gap-3">
-            {[product.images[0], product.images[0], product.images[0], product.images[0]].map((image, index) => (
+            {images.slice(0, 4).map((image, index) => (
               <div key={index} className="relative aspect-square overflow-hidden rounded-md border"><Image src={image} alt={`${product.name} view ${index + 1}`} fill className="object-cover" sizes="15vw" /></div>
             ))}
           </div>
@@ -104,6 +107,21 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
       <section className="mt-16">
         <h2 className="mb-5 flex items-center text-2xl font-bold"><Zap className="mr-2 size-5 text-primary" /> Related Products</h2>
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">{related.map((item) => <ProductCard key={item.id} product={item} />)}</div>
+      </section>
+      <section className="mt-16">
+        <h2 className="mb-5 text-2xl font-bold">Customer Reviews</h2>
+        <div className="grid gap-4">
+          {reviews.length ? reviews.map((review) => (
+            <Card key={review.id}>
+              <CardContent className="p-5">
+                <div className="flex items-center gap-2 text-sm text-amber-500"><Star className="size-4 fill-current" /> {review.rating}</div>
+                <h3 className="mt-2 font-semibold">{review.title}</h3>
+                <p className="mt-2 text-sm text-muted-foreground">{review.body}</p>
+                <p className="mt-3 text-xs text-muted-foreground">{review.author} | {new Date(review.createdAt).toLocaleDateString()}</p>
+              </CardContent>
+            </Card>
+          )) : <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">No approved reviews yet.</div>}
+        </div>
       </section>
     </section>
   );

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { AdminDashboard } from "@/components/admin-dashboard";
 import { requirePermission } from "@/lib/admin-auth";
+import { orderStatusLabels, orderStatuses } from "@/lib/admin-analytics";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { AdminActivity, Booking, ChartPoint, InventoryAlert, Order, Payment, PaymentLog, Product } from "@/lib/types";
 
@@ -23,15 +24,22 @@ function arrayValue<T>(value: unknown, fallback: T[] = []) {
   return Array.isArray(value) ? (value as T[]) : fallback;
 }
 
+function objectValue(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Row) : {};
+}
+
 function mapProduct(row: Row): Product {
+  const category = objectValue(row.categories);
+  const brand = objectValue(row.brands);
+  const productImages = arrayValue<Row>(row.product_images);
   return {
     id: text(row.id),
     slug: text(row.slug),
     sku: text(row.sku),
     name: text(row.name),
-    brand: text(row.brand_name, "Unassigned"),
-    category: text(row.category_name, "Unassigned"),
-    subcategory: text(row.category_name, "Unassigned"),
+    brand: text(brand.name, "Unassigned"),
+    category: text(category.name, "Unassigned"),
+    subcategory: text(category.name, "Unassigned"),
     condition: text(row.condition, "new") as Product["condition"],
     costPrice: numberValue(row.cost_price),
     price: numberValue(row.price),
@@ -47,7 +55,7 @@ function mapProduct(row: Row): Product {
     supplierContact: text(row.supplier_contact),
     warranty: text(row.warranty),
     status: text(row.status, "active") as Product["status"],
-    images: arrayValue<string>(row.images),
+    images: productImages.length ? productImages.map((image) => text(image.public_url)).filter(Boolean) : arrayValue<string>(row.images),
     description: text(row.description),
     specs: (row.specs && typeof row.specs === "object" ? row.specs : {}) as Record<string, string>,
     featured: Boolean(row.featured),
@@ -105,16 +113,20 @@ function chartFromOrders(orders: Order[]): ChartPoint[] {
 async function loadDashboardData() {
   const supabase = createAdminClient();
   if (!supabase) {
-    return { products: [], orders: [], payments: [], paymentLogs: [], bookings: [], activities: [] };
+    return { products: [], orders: [], payments: [], paymentLogs: [], bookings: [], activities: [], users: [], orderItems: [], blogPosts: [], contactInquiryCount: 0 };
   }
 
-  const [productsResult, ordersResult, paymentsResult, paymentLogsResult, bookingsResult, auditResult] = await Promise.all([
-    supabase.from("products").select("*").order("created_at", { ascending: false }),
+  const [productsResult, ordersResult, paymentsResult, paymentLogsResult, bookingsResult, auditResult, usersResult, orderItemsResult, blogPostsResult, inquiriesResult] = await Promise.all([
+    supabase.from("products").select("*, categories(name,slug), brands(name,slug), product_images(public_url,sort_order,is_primary)").order("created_at", { ascending: false }),
     supabase.from("orders").select("*").order("created_at", { ascending: false }),
     supabase.from("payments").select("*").order("created_at", { ascending: false }),
     supabase.from("payment_logs").select("*").order("created_at", { ascending: false }),
     supabase.from("bookings").select("*").order("created_at", { ascending: false }),
-    supabase.from("audit_logs").select("*").order("created_at", { ascending: false }).limit(10)
+    supabase.from("audit_logs").select("*").order("created_at", { ascending: false }).limit(10),
+    supabase.from("users").select("id,created_at").order("created_at", { ascending: true }),
+    supabase.from("order_items").select("quantity, products(name)").limit(1000),
+    supabase.from("blog_posts").select("id,title,published,draft,scheduled_at,blog_categories(name)").order("created_at", { ascending: false }).limit(6),
+    supabase.from("contact_inquiries").select("id", { count: "exact", head: true })
   ]);
 
   const products = (productsResult.data ?? []).map((row) => mapProduct(row as Row));
@@ -148,17 +160,38 @@ async function loadDashboardData() {
     time: new Date(text((row as Row).created_at, new Date().toISOString())).toLocaleString()
   }));
 
-  return { products, orders, payments, paymentLogs, bookings, activities };
+  return {
+    products,
+    orders,
+    payments,
+    paymentLogs,
+    bookings,
+    activities,
+    users: usersResult.data ?? [],
+    orderItems: orderItemsResult.data ?? [],
+    blogPosts: blogPostsResult.data ?? [],
+    contactInquiryCount: inquiriesResult.count ?? 0
+  };
 }
 
 export default async function AdminPage() {
   await requirePermission("dashboard:read");
-  const { products, orders, payments, paymentLogs, bookings, activities } = await loadDashboardData();
+  const { products, orders, payments, paymentLogs, bookings, activities, users, orderItems, blogPosts, contactInquiryCount } = await loadDashboardData();
   const completedOrders = orders.filter((order) => ["payment_verified", "completed"].includes(order.status));
   const pendingOrders = orders.filter((order) => ["pending_payment", "payment_submitted"].includes(order.status));
   const revenueChart = chartFromOrders(completedOrders);
-  const ordersChart = chartFromOrders(orders);
-  const productPerformanceChart = products.map((product) => ({ name: product.name, units: product.unitsSold ?? 0, stock: product.stock })).slice(0, 8);
+  const ordersChart = orderStatuses.map((status) => ({ name: orderStatusLabels[status], orders: orders.filter((order) => order.status === status).length }));
+  const customerGrowthChart = (users as Row[]).map((user, index) => ({
+    name: new Date(text(user.created_at, new Date().toISOString())).toLocaleDateString("en-KE", { month: "short", day: "numeric" }),
+    customers: index + 1
+  }));
+  const productUnits = new Map<string, number>();
+  orderItems.forEach((row) => {
+    const product = Array.isArray((row as Row).products) ? (row as Row).products[0] as Row | undefined : objectValue((row as Row).products);
+    const name = text(product?.name);
+    if (name) productUnits.set(name, (productUnits.get(name) ?? 0) + numberValue((row as Row).quantity));
+  });
+  const productPerformanceChart = Array.from(productUnits, ([name, units]) => ({ name, units, stock: products.find((product) => product.name === name)?.stock ?? 0 })).sort((a, b) => b.units - a.units).slice(0, 8);
   const inventoryAlerts: InventoryAlert[] = products
     .filter((product) => product.stock <= product.lowStockThreshold)
     .map((product) => ({
@@ -180,7 +213,7 @@ export default async function AdminPage() {
         deliveredOrders: orders.filter((order) => order.status === "completed").length,
         cancelledOrders: orders.filter((order) => order.status === "cancelled").length,
         completedOrders: completedOrders.length,
-        totalCustomers: new Set(orders.map((order) => order.customerEmail)).size,
+        totalCustomers: (users as Row[]).length,
         totalProducts: products.length,
         submittedPayments: payments.filter((payment) => !payment.verified && !payment.rejected).length,
         lowStockProducts: products.filter((product) => product.stock > 0 && product.stock <= product.lowStockThreshold).length,
@@ -188,7 +221,7 @@ export default async function AdminPage() {
       }}
       revenueChart={revenueChart}
       ordersChart={ordersChart}
-      customerGrowthChart={ordersChart}
+      customerGrowthChart={customerGrowthChart}
       productPerformanceChart={productPerformanceChart}
       products={products}
       orders={orders}
@@ -197,6 +230,15 @@ export default async function AdminPage() {
       bookings={bookings}
       inventoryAlerts={inventoryAlerts}
       activities={activities}
+      blogPosts={blogPosts.map((row) => ({
+        id: text((row as Row).id),
+        title: text((row as Row).title),
+        published: Boolean((row as Row).published),
+        draft: Boolean((row as Row).draft),
+        scheduledAt: text((row as Row).scheduled_at),
+        category: text(objectValue((row as Row).blog_categories).name)
+      }))}
+      contactInquiryCount={contactInquiryCount}
     />
   );
 }

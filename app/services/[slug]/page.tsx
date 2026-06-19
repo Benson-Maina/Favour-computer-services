@@ -8,22 +8,24 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { services } from "@/lib/data";
+import { getServices } from "@/lib/data";
 import { whatsappUrl } from "@/lib/utils";
 
-export function generateStaticParams() {
+export async function generateStaticParams() {
+  const services = await getServices();
   return services.map((service) => ({ slug: service.slug }));
 }
 
 export default async function ServicePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  const services = await getServices();
   const service = services.find((item) => item.slug === slug);
   if (!service) notFound();
 
   return (
     <section>
       <div className="relative min-h-[420px]">
-        <Image priority src={service.image} alt={service.title} fill className="object-cover" sizes="100vw" />
+        {service.image ? <Image priority src={service.image} alt={service.title} fill className="object-cover" sizes="100vw" /> : null}
         <div className="absolute inset-0 bg-slate-950/65" />
         <div className="container relative flex min-h-[420px] flex-col justify-end pb-12 text-white">
           <p className="mb-2 text-sm font-bold uppercase text-cyan-300">Professional Service</p>
@@ -49,7 +51,7 @@ export default async function ServicePage({ params }: { params: Promise<{ slug: 
           <div>
             <h2 className="mb-4 text-2xl font-bold">Gallery</h2>
             <div className="grid gap-4 md:grid-cols-3">
-              {[service.image, service.image, service.image].map((image, index) => <div key={index} className="relative aspect-[4/3] overflow-hidden rounded-lg"><Image src={image} alt={`${service.title} gallery ${index + 1}`} fill className="object-cover" sizes="33vw" /></div>)}
+              {service.image ? [service.image].map((image, index) => <div key={index} className="relative aspect-[4/3] overflow-hidden rounded-lg"><Image src={image} alt={`${service.title} gallery ${index + 1}`} fill className="object-cover" sizes="33vw" /></div>) : null}
             </div>
           </div>
           <div>

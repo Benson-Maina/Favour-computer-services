@@ -1,6 +1,3 @@
-"use client";
-
-import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Star } from "lucide-react";
@@ -11,34 +8,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
 
-function ImageWithFallback({ src, alt, className, sizes }: { src: string; alt: string; className: string; sizes: string }) {
-  const [hasError, setHasError] = useState(false);
-  const fallbackImage = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300'%3E%3Crect fill='%23e5e7eb' width='400' height='300'/%3E%3Ctext x='50%25' y='50%25' font-size='14' fill='%236b7280' text-anchor='middle' dominant-baseline='middle'%3EImage unavailable%3C/text%3E%3C/svg%3E";
-
-  return (
-    <Image 
-      src={hasError ? fallbackImage : src} 
-      alt={alt} 
-      fill 
-      className={className}
-      sizes={sizes}
-      onError={() => setHasError(true)}
-      priority={false}
-    />
-  );
-}
-
 export function ProductCard({ product }: { product: Product }) {
+  const image = product.images[0];
   return (
     <Card className="group overflow-hidden transition-all hover:-translate-y-1 hover:shadow-premium">
       <Link href={`/products/${product.slug}`} className="block">
         <div className="relative aspect-[4/3] overflow-hidden bg-secondary">
-          <ImageWithFallback 
-            src={product.images[0]} 
-            alt={product.name} 
-            className="object-cover transition-transform duration-500 group-hover:scale-105" 
-            sizes="(max-width: 768px) 100vw, 25vw"
-          />
+          {image ? (
+            <Image src={image} alt={product.name} fill className="object-cover transition-transform duration-500 group-hover:scale-105" sizes="(max-width: 768px) 100vw, 25vw" />
+          ) : null}
           {product.badge ? <Badge className="absolute left-3 top-3">{product.badge}</Badge> : null}
         </div>
       </Link>

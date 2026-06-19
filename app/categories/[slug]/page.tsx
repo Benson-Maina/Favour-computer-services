@@ -1,14 +1,16 @@
 import { notFound } from "next/navigation";
 import { ProductCard } from "@/components/product-card";
 import { SectionHeading } from "@/components/section-heading";
-import { categories, products } from "@/lib/data";
+import { getCategories, getProducts } from "@/lib/data";
 
-export function generateStaticParams() {
+export async function generateStaticParams() {
+  const categories = await getCategories();
   return categories.map((category) => ({ slug: category.slug }));
 }
 
 export default async function CategoryPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  const [categories, products] = await Promise.all([getCategories(), getProducts()]);
   const category = categories.find((item) => item.slug === slug);
   if (!category) notFound();
   const items = products.filter((product) => product.category === category.name);

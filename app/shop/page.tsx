@@ -3,7 +3,7 @@ import { ProductCard } from "@/components/product-card";
 import { SectionHeading } from "@/components/section-heading";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { categories, products } from "@/lib/data";
+import { getCategories, getProducts } from "@/lib/data";
 
 export const metadata: Metadata = {
   title: "Shop Electronics Nairobi",
@@ -12,6 +12,7 @@ export const metadata: Metadata = {
 
 export default async function ShopPage({ searchParams }: { searchParams: Promise<{ category?: string; brand?: string; q?: string; sort?: string }> }) {
   const query = await searchParams;
+  const [products, categories] = await Promise.all([getProducts(), getCategories()]);
   const q = query.q?.toLowerCase() ?? "";
   const filtered = products
     .filter((product) => !query.category || product.category.toLowerCase() === query.category.toLowerCase())

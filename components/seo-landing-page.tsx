@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { ProductCard } from "@/components/product-card";
 import { Button } from "@/components/ui/button";
-import { business, products, services } from "@/lib/data";
+import { getBusinessSettings, getProducts, getServices } from "@/lib/data";
 
 type SeoLandingPageProps = {
   title: string;
@@ -12,7 +12,8 @@ type SeoLandingPageProps = {
   cta: string;
 };
 
-export function SeoLandingPage({ title, description, category, serviceSlug, cta }: SeoLandingPageProps) {
+export async function SeoLandingPage({ title, description, category, serviceSlug, cta }: SeoLandingPageProps) {
+  const [business, products, services] = await Promise.all([getBusinessSettings(), getProducts(), getServices()]);
   const pageProducts = category ? products.filter((product) => product.category.toLowerCase() === category.toLowerCase() || product.subcategory.toLowerCase() === category.toLowerCase()).slice(0, 6) : [];
   const service = serviceSlug ? services.find((item) => item.slug === serviceSlug) : null;
   const jsonLd = {

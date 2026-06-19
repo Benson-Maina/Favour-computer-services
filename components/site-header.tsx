@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Menu, UserRound } from "lucide-react";
-import { business, categories } from "@/lib/data";
+import { getBusinessSettings, getCategories, getProducts } from "@/lib/data";
 import { Button } from "@/components/ui/button";
 import { CartIconLink } from "@/components/cart-icon-link";
 import { SearchPanel } from "@/components/search-panel";
@@ -16,7 +16,8 @@ const nav = [
   ["Contact", "/contact"]
 ];
 
-export function SiteHeader() {
+export async function SiteHeader() {
+  const [business, categories, products] = await Promise.all([getBusinessSettings(), getCategories(), getProducts({ limit: 20 })]);
   return (
     <header className="sticky top-0 z-50 border-b bg-background/90 backdrop-blur-xl">
       <div className="bg-slate-950 py-2 text-xs text-white">
@@ -38,7 +39,7 @@ export function SiteHeader() {
           ))}
         </nav>
         <div className="flex items-center gap-1">
-          <SearchPanel />
+          <SearchPanel products={products} />
           <CartIconLink />
           <Button asChild variant="ghost" size="icon" aria-label="Account">
             <Link href="/account"><UserRound className="size-5" /></Link>

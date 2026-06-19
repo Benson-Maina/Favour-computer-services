@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { business } from "@/lib/data";
+import { business, getBusinessSettings } from "@/lib/data";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -34,7 +34,8 @@ export const metadata: Metadata = {
   }
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const business = await getBusinessSettings();
   const organizationJsonLd = {
     "@context": "https://schema.org",
     "@type": "LocalBusiness",

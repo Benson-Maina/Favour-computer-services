@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { Mail, MapPin, Phone } from "lucide-react";
-import { business, categories, services } from "@/lib/data";
+import { getBusinessSettings, getCategories, getServices } from "@/lib/data";
 
-export function SiteFooter() {
+export async function SiteFooter() {
+  const [business, categories, services] = await Promise.all([getBusinessSettings(), getCategories(), getServices()]);
   return (
     <footer className="border-t bg-slate-950 text-slate-200">
       <div className="container grid gap-8 py-12 md:grid-cols-4">

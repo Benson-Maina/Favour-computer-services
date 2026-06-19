@@ -9,13 +9,23 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { business, blogPosts, categories, faqs, products, services, testimonials } from "@/lib/data";
+import { getBlogPosts, getBusinessSettings, getCategories, getFaqs, getProducts, getServices, getTestimonials } from "@/lib/data";
 import { whatsappUrl } from "@/lib/utils";
 
-export default function HomePage() {
+export default async function HomePage() {
+  const [business, products, categories, services, testimonials, faqs, blogPosts] = await Promise.all([
+    getBusinessSettings(),
+    getProducts(),
+    getCategories(),
+    getServices(),
+    getTestimonials(),
+    getFaqs(),
+    getBlogPosts({ limit: 3 })
+  ]);
   const featured = products.filter((product) => product.featured);
   const latest = [...products].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 4);
   const best = products.filter((product) => product.bestSelling).slice(0, 4);
+  const heroProduct = featured[0] ?? latest[0];
 
   return (
     <>
@@ -46,12 +56,16 @@ export default function HomePage() {
             </div>
           </div>
           <div className="relative">
-            <div className="glass grid aspect-[5/4] place-items-center overflow-hidden rounded-lg p-8 text-center">
-              <div>
-                <p className="text-sm font-bold uppercase text-primary">Inventory ready</p>
-                <h2 className="mt-2 text-3xl font-black">Add real products from the admin dashboard</h2>
-                <p className="mt-3 text-muted-foreground">The storefront is clean and ready for Supabase product images, stock, and pricing.</p>
-              </div>
+            <div className="glass relative grid aspect-[5/4] place-items-center overflow-hidden rounded-lg p-8 text-center">
+              {heroProduct?.images[0] ? <Image src={heroProduct.images[0]} alt={heroProduct.name} fill className="object-cover" sizes="(max-width: 1024px) 100vw, 45vw" priority /> : null}
+              <div className="absolute inset-0 bg-slate-950/40" />
+              {heroProduct ? (
+                <div className="relative text-white">
+                  <p className="text-sm font-bold uppercase text-cyan-200">{heroProduct.category}</p>
+                  <h2 className="mt-2 text-3xl font-black">{heroProduct.name}</h2>
+                  <p className="mt-3">{heroProduct.stock > 0 ? `${heroProduct.stock} in stock` : "Out of stock"}</p>
+                </div>
+              ) : null}
             </div>
             <div className="absolute -bottom-6 left-6 right-6 rounded-lg bg-slate-950 p-5 text-white shadow-glow">
               <p className="text-sm text-slate-300">Visit us at</p>
@@ -66,7 +80,7 @@ export default function HomePage() {
         <div className="grid gap-4 md:grid-cols-3">
           {categories.length ? categories.map((category) => (
             <Link key={category.slug} href={`/categories/${category.slug}`} className="group relative min-h-56 overflow-hidden rounded-lg">
-              <Image src={category.image} alt={category.name} fill className="object-cover transition-transform duration-500 group-hover:scale-105" sizes="(max-width: 768px) 100vw, 33vw" />
+              {category.image ? <Image src={category.image} alt={category.name} fill className="object-cover transition-transform duration-500 group-hover:scale-105" sizes="(max-width: 768px) 100vw, 33vw" /> : null}
               <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 to-slate-950/10" />
               <div className="absolute bottom-0 p-5 text-white">
                 <h3 className="text-xl font-bold">{category.name}</h3>
@@ -101,7 +115,7 @@ export default function HomePage() {
         <div className="grid gap-5 md:grid-cols-4">
           {services.length ? services.map((service) => (
             <Card key={service.slug} className="overflow-hidden transition-all hover:-translate-y-1 hover:shadow-premium">
-              <div className="relative aspect-[4/3]"><Image src={service.image} alt={service.title} fill className="object-cover" sizes="25vw" /></div>
+              <div className="relative aspect-[4/3] bg-secondary">{service.image ? <Image src={service.image} alt={service.title} fill className="object-cover" sizes="25vw" /> : null}</div>
               <CardContent className="space-y-3 p-5">
                 <Zap className="size-5 text-primary" />
                 <h3 className="font-bold">{service.title}</h3>
@@ -149,7 +163,7 @@ export default function HomePage() {
           <div className="grid gap-4 md:grid-cols-3">
             {blogPosts.length ? blogPosts.map((post) => (
               <Link key={post.slug} href={`/blog/${post.slug}`} className="group">
-                <div className="relative mb-3 aspect-[4/3] overflow-hidden rounded-lg"><Image src={post.image} alt={post.title} fill className="object-cover transition-transform group-hover:scale-105" sizes="33vw" /></div>
+                <div className="relative mb-3 aspect-[4/3] overflow-hidden rounded-lg bg-secondary">{post.image ? <Image src={post.image} alt={post.title} fill className="object-cover transition-transform group-hover:scale-105" sizes="33vw" /> : null}</div>
                 <h3 className="font-semibold group-hover:text-primary">{post.title}</h3>
                 <p className="mt-1 text-sm text-muted-foreground">{post.excerpt}</p>
               </Link>

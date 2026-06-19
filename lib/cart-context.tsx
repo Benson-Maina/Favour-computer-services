@@ -29,7 +29,6 @@ type CartContextValue = {
 };
 
 const CartContext = createContext<CartContextValue | null>(null);
-const storageKey = "favour-computer-services-cart";
 
 function sanitizeItems(value: unknown): CartItem[] {
   if (!Array.isArray(value)) return [];
@@ -44,23 +43,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const syncInProgressRef = useRef(false);
 
-  // Load from localStorage on mount
   useEffect(() => {
-    try {
-      setItems(sanitizeItems(JSON.parse(localStorage.getItem(storageKey) ?? "[]")));
-    } catch {
-      setItems([]);
-    } finally {
-      setHydrated(true);
-    }
+    setHydrated(true);
   }, []);
 
-  // Save to localStorage whenever items change
-  useEffect(() => {
-    if (hydrated) localStorage.setItem(storageKey, JSON.stringify(items));
-  }, [hydrated, items]);
-
-  // Load user's saved cart from Supabase (only once after hydration)
   useEffect(() => {
     if (!hydrated) return;
     const supabase = createBrowserSupabaseClient();
@@ -68,7 +54,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) return;
-      // Only load saved items if local cart is empty
       if (items.length === 0) {
         try {
           const { data: rows, error } = await supabase.from("cart_items").select("payload").eq("user_id", data.user.id);
@@ -81,9 +66,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         }
       }
     });
-  }, [hydrated]); // Only run once on hydration
+  }, [hydrated]);
 
-  // Sync cart to Supabase with debouncing to prevent race conditions
   useEffect(() => {
     if (!hydrated || syncInProgressRef.current) return;
     
@@ -106,10 +90,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         }
 
         try {
-          // Delete old cart items
           await supabase.from("cart_items").delete().eq("user_id", data.user.id);
           
-          // Insert new cart items if any
           if (items.length > 0) {
             await supabase.from("cart_items").insert(items.map((item) => ({
               user_id: data.user.id,
@@ -120,12 +102,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           }
         } catch (err) {
           console.error("Failed to sync cart to Supabase:", err);
-          // Don't show error to user - local cart still works
         } finally {
           syncInProgressRef.current = false;
         }
       });
-    }, 500); // Wait 500ms after last change before syncing
+    }, 500);
 
     return () => {
       if (syncTimeoutRef.current) {

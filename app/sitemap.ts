@@ -1,7 +1,8 @@
 import type { MetadataRoute } from "next";
-import { blogPosts, business, categories, products, services } from "@/lib/data";
+import { getBlogPosts, getBusinessSettings, getCategories, getProducts, getServices } from "@/lib/data";
 
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const [business, products, categories, services, blogPosts] = await Promise.all([getBusinessSettings(), getProducts(), getCategories(), getServices(), getBlogPosts()]);
   const staticRoutes = ["", "/shop", "/categories", "/services", "/blog", "/about", "/contact", "/laptops-nairobi", "/phones-nairobi", "/ssd-nairobi", "/cctv-installation-nairobi", "/live-streaming-nairobi"].map((path) => ({ url: `${business.siteUrl}${path}`, lastModified: new Date() }));
   return [
     ...staticRoutes,

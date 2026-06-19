@@ -5,6 +5,7 @@ import { requirePermission } from "@/lib/admin-auth";
 import { business } from "@/lib/data";
 import { adminEmailHtml, sendTransactionalEmail } from "@/lib/email";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import { bookingSchema, checkoutSchema, contactSchema, inventoryAdjustmentSchema, newsletterSchema, orderStatusSchema, paymentReviewSchema, productAdminSchema, productLifecycleSchema } from "@/lib/validation";
 
 type ActionState = { 
@@ -23,6 +24,27 @@ type ActionState = {
 function getString(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === "string" ? value : "";
+}
+
+function slugify(value: string) {
+  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+async function uploadStorageFile(bucket: string, folder: string, file: FormDataEntryValue | null) {
+  if (!(file instanceof File) || file.size === 0) return null;
+  const supabase = createAdminClient();
+  if (!supabase) return null;
+
+  const extension = file.name.split(".").pop() || "bin";
+  const path = `${folder}/${crypto.randomUUID()}.${extension}`;
+  const { error } = await supabase.storage.from(bucket).upload(path, file, { contentType: file.type, upsert: false });
+  if (error) {
+    console.error(`${bucket} storage upload error:`, error);
+    return null;
+  }
+
+  const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+  return { path, publicUrl: data.publicUrl };
 }
 
 export async function submitContact(_: ActionState, formData: FormData): Promise<ActionState> {
@@ -173,9 +195,26 @@ export async function submitCheckout(_: ActionState, formData: FormData): Promis
       return { ok: false, message: "Service unavailable. Please try again." };
     }
 
+    const serverSupabase = await createClient();
+    const { data: userData } = serverSupabase ? await serverSupabase.auth.getUser() : { data: { user: null } };
+    const paymentProof = await uploadStorageFile("payments", `orders/${orderId}`, formData.get("paymentScreenshot"));
+
+    if (userData.user && parsed.data.address) {
+      await supabase.from("addresses").insert({
+        user_id: userData.user.id,
+        label: parsed.data.deliveryMethod,
+        recipient_name: parsed.data.name,
+        phone: parsed.data.phone,
+        address_line: parsed.data.address,
+        city: "Nairobi",
+        is_default: false
+      });
+    }
+
     // Create order record
     const { error: orderError, data: orderData } = await supabase.from("orders").insert({
       id: orderId,
+      user_id: userData.user?.id,
       customer_name: parsed.data.name,
       customer_email: parsed.data.email,
       customer_phone: parsed.data.phone,
@@ -183,6 +222,7 @@ export async function submitCheckout(_: ActionState, formData: FormData): Promis
       shipping_address: parsed.data.address,
       notes: parsed.data.notes,
       payment_reference: parsed.data.paymentReference,
+      payment_screenshot_url: paymentProof?.publicUrl,
       items_snapshot: parsedItems,
       status: "payment_submitted",
       payment_status: "pending_verification",
@@ -214,6 +254,7 @@ export async function submitCheckout(_: ActionState, formData: FormData): Promis
       paybill_number: business.paybill,
       account_number: business.account,
       transaction_code: parsed.data.paymentReference,
+      confirmation_url: paymentProof?.publicUrl,
       status: "pending_verification",
       verified: false,
       rejected: false
@@ -463,7 +504,24 @@ export async function saveProduct(_: ActionState, formData: FormData): Promise<A
     } catch {
       return { ok: false, message: "Specifications must be valid JSON." };
     }
-    await supabase.from("products").upsert({
+    const categorySlug = slugify(parsed.data.category);
+    const brandSlug = slugify(parsed.data.brand);
+    const [{ data: category }, { data: brand }] = await Promise.all([
+      supabase.from("categories").upsert({ name: parsed.data.category, slug: categorySlug }, { onConflict: "slug" }).select("id").single(),
+      supabase.from("brands").upsert({ name: parsed.data.brand, slug: brandSlug }, { onConflict: "slug" }).select("id").single()
+    ]);
+    const imageUrls = parsed.data.images ? parsed.data.images.split("\n").map((item) => item.trim()).filter(Boolean) : [];
+    const uploadedImages = await Promise.all(
+      formData
+        .getAll("productImages")
+        .map((file) => uploadStorageFile("products", parsed.data.slug, file))
+    );
+    const uploadedUrls = uploadedImages.map((image) => image?.publicUrl).filter((url): url is string => Boolean(url));
+    const images = [...imageUrls, ...uploadedUrls];
+
+    const { data: savedProduct, error: productError } = await supabase.from("products").upsert({
+      category_id: category?.id,
+      brand_id: brand?.id,
       name: parsed.data.name,
       slug: parsed.data.slug,
       sku: parsed.data.sku,
@@ -476,13 +534,28 @@ export async function saveProduct(_: ActionState, formData: FormData): Promise<A
       stock: parsed.data.stock,
       low_stock_threshold: parsed.data.lowStockThreshold,
       specs,
-      images: parsed.data.images ? parsed.data.images.split("\n").filter(Boolean) : [],
+      images,
       featured: parsed.data.featured ?? false,
       new_arrival: parsed.data.newArrival ?? false,
       warranty: parsed.data.warranty,
       supplier_name: parsed.data.supplierName,
       supplier_contact: parsed.data.supplierContact
-    }, { onConflict: "slug" });
+    }, { onConflict: "slug" }).select("id").single();
+    if (productError) {
+      console.error("Product save error:", productError);
+      return { ok: false, message: "Product could not be saved." };
+    }
+    if (savedProduct?.id && images.length) {
+      await supabase.from("product_images").delete().eq("product_id", savedProduct.id);
+      await supabase.from("product_images").insert(images.map((url, index) => ({
+        product_id: savedProduct.id,
+        storage_path: url,
+        public_url: url,
+        alt_text: parsed.data.name,
+        sort_order: index,
+        is_primary: index === 0
+      })));
+    }
     await supabase.rpc("log_audit", {
       action_input: "Product Saved",
       entity_input: parsed.data.sku,

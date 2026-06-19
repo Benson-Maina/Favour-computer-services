@@ -4,9 +4,10 @@ import { ActionForm } from "@/components/action-form-status";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { business } from "@/lib/data";
+import { getBusinessSettings } from "@/lib/data";
 
-export default function ContactPage() {
+export default async function ContactPage() {
+  const business = await getBusinessSettings();
   return (
     <section className="container grid gap-8 py-12 lg:grid-cols-[0.8fr_1fr]">
       <div className="space-y-5">
