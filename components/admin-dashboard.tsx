@@ -72,6 +72,29 @@ export function AdminDashboard({
     ["Total Customers", metrics.totalCustomers]
   ];
   const firstProduct = products[0];
+  const productForm = firstProduct ?? {
+    id: "",
+    name: "",
+    slug: "",
+    sku: "",
+    brand: "",
+    category: "",
+    condition: "new" as const,
+    status: "active" as const,
+    description: "",
+    specs: {},
+    images: [],
+    costPrice: 0,
+    price: 0,
+    salePrice: undefined,
+    stock: 0,
+    supplierName: "",
+    supplierContact: "",
+    warranty: "",
+    lowStockThreshold: 3,
+    featured: false,
+    newArrival: false
+  };
 
   return (
     <section className="container py-10">
@@ -257,51 +280,51 @@ export function AdminDashboard({
               <PackagePlus className="size-5 text-primary" />
               <h2 className="text-xl font-bold">Product Management</h2>
             </div>
-            {firstProduct ? <ActionForm action={saveProduct} buttonLabel="Save Product">
-              <Input name="name" defaultValue={firstProduct.name} placeholder="Name" />
+            <ActionForm action={saveProduct} buttonLabel={firstProduct ? "Save Product" : "Create Product"}>
+              <Input name="name" defaultValue={productForm.name} placeholder="Name" />
               <div className="grid gap-3 sm:grid-cols-2">
-                <Input name="slug" defaultValue={`${firstProduct.slug}-copy`} placeholder="Slug" />
-                <Input name="sku" defaultValue={`${firstProduct.sku}-COPY`} placeholder="SKU" />
+                <Input name="slug" defaultValue={productForm.slug} placeholder="Slug" />
+                <Input name="sku" defaultValue={productForm.sku} placeholder="SKU" />
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                <Input name="brand" defaultValue={firstProduct.brand} placeholder="Brand" />
-                <Input name="category" defaultValue={firstProduct.category} placeholder="Category" />
+                <Input name="brand" defaultValue={productForm.brand} placeholder="Brand" />
+                <Input name="category" defaultValue={productForm.category} placeholder="Category" />
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                <select name="productCondition" defaultValue={firstProduct.condition ?? "new"} className="h-10 rounded-md border bg-background px-3 text-sm">
+                <select name="productCondition" defaultValue={productForm.condition ?? "new"} className="h-10 rounded-md border bg-background px-3 text-sm">
                   <option value="new">New</option>
                   <option value="refurbished">Refurbished</option>
                   <option value="used">Used</option>
                 </select>
-                <select name="availabilityStatus" defaultValue={firstProduct.status ?? "active"} className="h-10 rounded-md border bg-background px-3 text-sm">
+                <select name="availabilityStatus" defaultValue={productForm.status ?? "active"} className="h-10 rounded-md border bg-background px-3 text-sm">
                   <option value="active">Active</option>
                   <option value="draft">Draft</option>
                   <option value="hidden">Hidden</option>
                   <option value="archived">Archived</option>
                 </select>
               </div>
-              <Textarea name="description" defaultValue={firstProduct.description} placeholder="Description" />
-              <Textarea name="specifications" defaultValue={JSON.stringify(firstProduct.specs, null, 2)} placeholder="Specifications JSON" />
-              <Input name="images" defaultValue={firstProduct.images.join("\n")} placeholder="Image URLs" />
+              <Textarea name="description" defaultValue={productForm.description} placeholder="Description" />
+              <Textarea name="specifications" defaultValue={JSON.stringify(productForm.specs, null, 2)} placeholder="Specifications JSON" />
+              <Input name="images" defaultValue={productForm.images.join("\n")} placeholder="Supabase Storage image URLs" />
               <div className="grid gap-3 sm:grid-cols-3">
-                <Input name="costPrice" type="number" defaultValue={firstProduct.costPrice} placeholder="Cost" />
-                <Input name="price" type="number" defaultValue={firstProduct.price} />
-                <Input name="salePrice" type="number" defaultValue={firstProduct.salePrice} />
+                <Input name="costPrice" type="number" defaultValue={productForm.costPrice} placeholder="Cost" />
+                <Input name="price" type="number" defaultValue={productForm.price} />
+                <Input name="salePrice" type="number" defaultValue={productForm.salePrice} />
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                <Input name="stock" type="number" defaultValue={firstProduct.stock} />
-                <Input name="warranty" defaultValue={firstProduct.warranty} placeholder="Warranty" />
+                <Input name="stock" type="number" defaultValue={productForm.stock} />
+                <Input name="warranty" defaultValue={productForm.warranty} placeholder="Warranty" />
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                <Input name="supplierName" defaultValue={firstProduct.supplierName} />
-                <Input name="supplierContact" defaultValue={firstProduct.supplierContact} />
+                <Input name="supplierName" defaultValue={productForm.supplierName} />
+                <Input name="supplierContact" defaultValue={productForm.supplierContact} />
               </div>
-              <Input name="lowStockThreshold" type="number" defaultValue={firstProduct.lowStockThreshold} />
+              <Input name="lowStockThreshold" type="number" defaultValue={productForm.lowStockThreshold} />
               <div className="flex gap-4 text-sm">
-                <label className="flex items-center gap-2"><input name="featured" type="checkbox" defaultChecked={firstProduct.featured} />Featured</label>
-                <label className="flex items-center gap-2"><input name="newArrival" type="checkbox" defaultChecked={firstProduct.newArrival} />New Arrival</label>
+                <label className="flex items-center gap-2"><input name="featured" type="checkbox" defaultChecked={productForm.featured} />Featured</label>
+                <label className="flex items-center gap-2"><input name="newArrival" type="checkbox" defaultChecked={productForm.newArrival} />New Arrival</label>
               </div>
-            </ActionForm> : <EmptyState title="No product records yet. Add your first product from the product management form." />}
+            </ActionForm>
             {firstProduct ? (
               <div className="mt-4 grid gap-2 sm:grid-cols-4">
                 {(["duplicate", "archive", "restore", "delete"] as const).map((action) => (
