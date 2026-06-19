@@ -7,7 +7,18 @@ import { adminEmailHtml, sendTransactionalEmail } from "@/lib/email";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { bookingSchema, checkoutSchema, contactSchema, inventoryAdjustmentSchema, newsletterSchema, orderStatusSchema, paymentReviewSchema, productAdminSchema, productLifecycleSchema } from "@/lib/validation";
 
-type ActionState = { ok: boolean; message: string; orderId?: string };
+type ActionState = { 
+  ok: boolean; 
+  message: string; 
+  orderId?: string;
+  customerName?: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  deliveryMethod?: string;
+  shippingAddress?: string;
+  notes?: string;
+  paymentReference?: string;
+};
 
 function getString(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -23,20 +34,32 @@ export async function submitContact(_: ActionState, formData: FormData): Promise
     message: getString(formData, "message")
   });
 
-  if (!parsed.success) return { ok: false, message: "Please check the contact form details." };
+  if (!parsed.success) {
+    console.warn("Contact form validation failed:", parsed.error.flatten());
+    return { ok: false, message: "Please check the contact form details." };
+  }
+
   try {
     const supabase = createAdminClient();
     if (supabase) {
       const { error } = await supabase.from("contact_inquiries").insert(parsed.data);
-      if (error) return { ok: false, message: "We could not save your inquiry. Please try again or contact us on WhatsApp." };
+      if (error) {
+        console.error("Contact inquiry save error:", error);
+        return { ok: false, message: "We could not save your inquiry. Please try again or contact us on WhatsApp." };
+      }
+    } else {
+      console.warn("Supabase admin client unavailable for contact inquiry");
     }
+
     await sendTransactionalEmail({
       to: process.env.ADMIN_EMAIL ?? business.email,
       subject: `New contact inquiry: ${parsed.data.subject}`,
       html: adminEmailHtml("New contact form submission", `${parsed.data.name} (${parsed.data.phone}) wrote: ${parsed.data.message}`)
     });
+    
     return { ok: true, message: `Thank you. Your inquiry has been sent to ${business.email}.` };
-  } catch {
+  } catch (e) {
+    console.error("Contact form submission error:", e);
     return { ok: false, message: "Something went wrong while sending your inquiry. Please try again." };
   }
 }
@@ -51,29 +74,67 @@ export async function submitBooking(_: ActionState, formData: FormData): Promise
     message: getString(formData, "message")
   });
 
-  if (!parsed.success) return { ok: false, message: "Please check the booking details." };
-  const supabase = createAdminClient();
-  if (supabase) await supabase.from("bookings").insert({ ...parsed.data, status: "new" });
-  await sendTransactionalEmail({
-    to: parsed.data.email,
-    subject: "Booking request received",
-    html: adminEmailHtml("Booking confirmation", `We received your ${parsed.data.service} booking request and will contact you to confirm details.`)
-  });
-  revalidatePath("/admin");
-  return { ok: true, message: "Booking request received. We will contact you to confirm details." };
+  if (!parsed.success) {
+    console.warn("Booking form validation failed:", parsed.error.flatten());
+    return { ok: false, message: "Please check the booking details." };
+  }
+
+  try {
+    const supabase = createAdminClient();
+    if (supabase) {
+      const { error } = await supabase.from("bookings").insert({ ...parsed.data, status: "new" });
+      if (error) {
+        console.error("Booking save error:", error);
+        return { ok: false, message: "We could not save your booking. Please try again." };
+      }
+    } else {
+      console.warn("Supabase admin client unavailable for booking");
+    }
+
+    await sendTransactionalEmail({
+      to: parsed.data.email,
+      subject: "Booking request received",
+      html: adminEmailHtml("Booking confirmation", `We received your ${parsed.data.service} booking request and will contact you to confirm details.`)
+    });
+    
+    revalidatePath("/admin");
+    return { ok: true, message: "Booking request received. We will contact you to confirm details." };
+  } catch (e) {
+    console.error("Booking submission error:", e);
+    return { ok: false, message: "Something went wrong while submitting your booking. Please try again." };
+  }
 }
 
 export async function subscribeNewsletter(_: ActionState, formData: FormData): Promise<ActionState> {
   const parsed = newsletterSchema.safeParse({ email: getString(formData, "email") });
-  if (!parsed.success) return { ok: false, message: "Enter a valid email address." };
-  const supabase = createAdminClient();
-  if (supabase) await supabase.from("newsletter_subscribers").upsert(parsed.data, { onConflict: "email" });
-  await sendTransactionalEmail({
-    to: parsed.data.email,
-    subject: "Welcome to Favour Computer Services updates",
-    html: adminEmailHtml("Newsletter welcome", "You are subscribed to product, repair, CCTV, and technology service updates.")
-  });
-  return { ok: true, message: "You are subscribed to Favour Computer Services updates." };
+  if (!parsed.success) {
+    console.warn("Newsletter subscription validation failed");
+    return { ok: false, message: "Enter a valid email address." };
+  }
+
+  try {
+    const supabase = createAdminClient();
+    if (supabase) {
+      const { error } = await supabase.from("newsletter_subscribers").upsert(parsed.data, { onConflict: "email" });
+      if (error) {
+        console.error("Newsletter subscription save error:", error);
+        return { ok: false, message: "Failed to subscribe. Please try again." };
+      }
+    } else {
+      console.warn("Supabase admin client unavailable for newsletter subscription");
+    }
+
+    await sendTransactionalEmail({
+      to: parsed.data.email,
+      subject: "Welcome to Favour Computer Services updates",
+      html: adminEmailHtml("Newsletter welcome", "You are subscribed to product, repair, CCTV, and technology service updates.")
+    });
+    
+    return { ok: true, message: "You are subscribed to Favour Computer Services updates." };
+  } catch (e) {
+    console.error("Newsletter subscription error:", e);
+    return { ok: false, message: "Something went wrong while subscribing. Please try again." };
+  }
 }
 
 export async function submitCheckout(_: ActionState, formData: FormData): Promise<ActionState> {
@@ -90,69 +151,132 @@ export async function submitCheckout(_: ActionState, formData: FormData): Promis
 
   if (!parsed.success) return { ok: false, message: "Please complete the checkout details." };
   const orderId = getString(formData, "orderId") || crypto.randomUUID();
-  const parsedItems = JSON.parse(parsed.data.items) as Array<{ productId?: string; id?: string; name: string; quantity: number; price?: number; unitPrice?: number }>;
+  
+  // Safely parse items with error handling
+  let parsedItems;
+  try {
+    parsedItems = JSON.parse(parsed.data.items) as Array<{ productId?: string; id?: string; name: string; quantity: number; price?: number; unitPrice?: number }>;
+    if (!Array.isArray(parsedItems) || parsedItems.length === 0) {
+      return { ok: false, message: "Your cart is empty. Add products before checkout." };
+    }
+  } catch (e) {
+    console.error("Cart items JSON parse error:", e);
+    return { ok: false, message: "Invalid cart data. Please refresh and try again." };
+  }
+  
   const total = parsedItems.reduce((sum, item) => sum + Number(item.price ?? item.unitPrice ?? 0) * Number(item.quantity), 0);
 
   try {
     const supabase = createAdminClient();
-    if (supabase) {
-      const { error: orderError } = await supabase.from("orders").insert({
-        id: orderId,
-        customer_name: parsed.data.name,
-        customer_email: parsed.data.email,
-        customer_phone: parsed.data.phone,
-        delivery_method: parsed.data.deliveryMethod,
-        shipping_address: parsed.data.address,
-        notes: parsed.data.notes,
-        payment_reference: parsed.data.paymentReference,
-        items_snapshot: parsedItems,
-        status: "payment_submitted",
-        payment_status: "pending_verification",
-        total
-      });
-      if (orderError) return { ok: false, message: "We could not create your order. Please try again." };
+    if (!supabase) {
+      console.error("Supabase admin client unavailable");
+      return { ok: false, message: "Service unavailable. Please try again." };
+    }
 
-      await supabase.from("order_items").insert(parsedItems.map((item) => ({
-        order_id: orderId,
-        product_id: item.productId ?? item.id,
-        quantity: item.quantity,
-        unit_price: Number(item.price ?? item.unitPrice ?? 0)
-      })));
+    // Create order record
+    const { error: orderError, data: orderData } = await supabase.from("orders").insert({
+      id: orderId,
+      customer_name: parsed.data.name,
+      customer_email: parsed.data.email,
+      customer_phone: parsed.data.phone,
+      delivery_method: parsed.data.deliveryMethod,
+      shipping_address: parsed.data.address,
+      notes: parsed.data.notes,
+      payment_reference: parsed.data.paymentReference,
+      items_snapshot: parsedItems,
+      status: "payment_submitted",
+      payment_status: "pending_verification",
+      total
+    }).select().single();
+    
+    if (orderError) {
+      console.error("Order creation error:", orderError);
+      return { ok: false, message: "Failed to create order. Please try again." };
+    }
 
-      await supabase.from("payments").insert({
-        order_id: orderId,
-        amount: total,
-        paybill_number: business.paybill,
-        account_number: business.account,
-        transaction_code: parsed.data.paymentReference,
-        status: "pending_verification",
-        verified: false,
-        rejected: false
-      });
-      await supabase.from("order_timeline").insert([
-        { order_id: orderId, label: "Order Created", actor_name: parsed.data.name },
-        { order_id: orderId, label: "Payment Submitted", actor_name: parsed.data.name }
-      ]);
-      await supabase.from("invoices").insert({
-        invoice_number: `FCS-INV-${orderId.slice(0, 8).toUpperCase()}`,
-        order_id: orderId,
-        customer_name: parsed.data.name,
-        items: parsedItems,
-        subtotal: total,
-        tax: 0,
-        total,
-        payment_status: "pending_verification"
-      });
+    // Create order items records
+    const { error: itemsError } = await supabase.from("order_items").insert(parsedItems.map((item) => ({
+      order_id: orderId,
+      product_id: item.productId ?? item.id,
+      quantity: item.quantity,
+      unit_price: Number(item.price ?? item.unitPrice ?? 0)
+    })));
+    
+    if (itemsError) {
+      console.error("Order items creation error:", itemsError);
+      // Don't fail - order is created, items might retry
+    }
+
+    // Create payment record
+    const { error: paymentError } = await supabase.from("payments").insert({
+      order_id: orderId,
+      amount: total,
+      paybill_number: business.paybill,
+      account_number: business.account,
+      transaction_code: parsed.data.paymentReference,
+      status: "pending_verification",
+      verified: false,
+      rejected: false
+    });
+    
+    if (paymentError) {
+      console.error("Payment record creation error:", paymentError);
+    }
+
+    // Create timeline entries
+    const { error: timelineError } = await supabase.from("order_timeline").insert([
+      { order_id: orderId, label: "Order Created", actor_name: parsed.data.name },
+      { order_id: orderId, label: "Payment Submitted", actor_name: parsed.data.name }
+    ]);
+    
+    if (timelineError) {
+      console.error("Timeline creation error:", timelineError);
+    }
+
+    // Create invoice record
+    const { error: invoiceError } = await supabase.from("invoices").insert({
+      invoice_number: `FCS-INV-${orderId.slice(0, 8).toUpperCase()}`,
+      order_id: orderId,
+      customer_name: parsed.data.name,
+      items: parsedItems,
+      subtotal: total,
+      tax: 0,
+      total,
+      payment_status: "pending_verification"
+    });
+    
+    if (invoiceError) {
+      console.error("Invoice creation error:", invoiceError);
     }
 
     revalidatePath("/admin");
-    await sendTransactionalEmail({
-      to: parsed.data.email,
-      subject: "Order placed successfully",
-      html: adminEmailHtml("Order placed successfully", `Your order ${orderId} has been submitted. We will verify Paybill reference ${parsed.data.paymentReference} and update you.`)
-    });
-    return { ok: true, message: "Order placed successfully", orderId };
-  } catch {
+    
+    // Send confirmation email
+    try {
+      await sendTransactionalEmail({
+        to: parsed.data.email,
+        subject: "Order placed successfully",
+        html: adminEmailHtml("Order placed successfully", `Your order ${orderId} has been submitted. We will verify Paybill reference ${parsed.data.paymentReference} and update you.`)
+      });
+    } catch (emailError) {
+      console.error("Email send error:", emailError);
+      // Don't fail the checkout if email fails
+    }
+
+    return { 
+      ok: true, 
+      message: "Order placed successfully", 
+      orderId,
+      customerName: parsed.data.name,
+      customerEmail: parsed.data.email,
+      customerPhone: parsed.data.phone,
+      deliveryMethod: parsed.data.deliveryMethod,
+      shippingAddress: parsed.data.address,
+      notes: parsed.data.notes,
+      paymentReference: parsed.data.paymentReference
+    };
+  } catch (e) {
+    console.error("Checkout error:", e);
     return { ok: false, message: "Checkout failed. Please review your details and try again." };
   }
 }
@@ -166,28 +290,56 @@ export async function adjustInventory(_: ActionState, formData: FormData): Promi
     actor: getString(formData, "actor") || "Admin"
   });
 
-  if (!parsed.success) return { ok: false, message: "Enter a valid inventory adjustment." };
-  const supabase = createAdminClient();
-  if (supabase) {
-    await supabase.from("inventory_movements").insert({
+  if (!parsed.success) {
+    console.warn("Inventory adjustment validation failed:", parsed.error.flatten());
+    return { ok: false, message: "Enter a valid inventory adjustment." };
+  }
+
+  try {
+    const supabase = createAdminClient();
+    if (!supabase) {
+      console.error("Supabase admin client unavailable for inventory adjustment");
+      return { ok: false, message: "Service unavailable. Please try again." };
+    }
+
+    const { error: movementError } = await supabase.from("inventory_movements").insert({
       product_id: parsed.data.productId,
       quantity_change: parsed.data.change,
       reason: parsed.data.reason,
       actor_name: parsed.data.actor
     });
-    await supabase.rpc("adjust_product_stock", {
+    
+    if (movementError) {
+      console.error("Inventory movement save error:", movementError);
+      return { ok: false, message: "Failed to record inventory movement." };
+    }
+
+    const { error: stockError } = await supabase.rpc("adjust_product_stock", {
       product_id_input: parsed.data.productId,
       stock_change_input: parsed.data.change
     });
-    await supabase.rpc("log_audit", {
+    
+    if (stockError) {
+      console.error("Stock adjustment RPC error:", stockError);
+    }
+
+    const { error: auditError } = await supabase.rpc("log_audit", {
       action_input: "Inventory Change",
       entity_input: parsed.data.productId,
       details_input: `${parsed.data.change} units: ${parsed.data.reason}`,
       user_name_input: parsed.data.actor
     });
+    
+    if (auditError) {
+      console.error("Audit log error:", auditError);
+    }
+
+    revalidatePath("/admin");
+    return { ok: true, message: "Inventory adjustment recorded." };
+  } catch (e) {
+    console.error("Inventory adjustment error:", e);
+    return { ok: false, message: "Failed to adjust inventory. Please try again." };
   }
-  revalidatePath("/admin");
-  return { ok: true, message: "Inventory adjustment recorded." };
 }
 
 export async function updateOrderStatus(_: ActionState, formData: FormData): Promise<ActionState> {

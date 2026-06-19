@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, useRef } from "react";
 import { toast } from "sonner";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import type { Product } from "@/lib/types";
@@ -41,7 +41,10 @@ function sanitizeItems(value: unknown): CartItem[] {
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
   const [hydrated, setHydrated] = useState(false);
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const syncInProgressRef = useRef(false);
 
+  // Load from localStorage on mount
   useEffect(() => {
     try {
       setItems(sanitizeItems(JSON.parse(localStorage.getItem(storageKey) ?? "[]")));
@@ -52,38 +55,83 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Save to localStorage whenever items change
   useEffect(() => {
     if (hydrated) localStorage.setItem(storageKey, JSON.stringify(items));
   }, [hydrated, items]);
 
+  // Load user's saved cart from Supabase (only once after hydration)
   useEffect(() => {
     if (!hydrated) return;
     const supabase = createBrowserSupabaseClient();
     if (!supabase) return;
+    
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) return;
-      const { data: rows } = await supabase.from("cart_items").select("payload").eq("user_id", data.user.id);
-      const savedItems = rows?.map((row) => row.payload as CartItem).filter(Boolean) ?? [];
-      if (savedItems.length && items.length === 0) setItems(savedItems);
-    });
-  }, [hydrated]);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    const supabase = createBrowserSupabaseClient();
-    if (!supabase) return;
-    supabase.auth.getUser().then(async ({ data }) => {
-      if (!data.user) return;
-      await supabase.from("cart_items").delete().eq("user_id", data.user.id);
-      if (items.length) {
-        await supabase.from("cart_items").insert(items.map((item) => ({
-          user_id: data.user.id,
-          product_id: item.productId,
-          quantity: item.quantity,
-          payload: item
-        })));
+      // Only load saved items if local cart is empty
+      if (items.length === 0) {
+        try {
+          const { data: rows, error } = await supabase.from("cart_items").select("payload").eq("user_id", data.user.id);
+          if (!error && rows?.length) {
+            const savedItems = rows.map((row) => row.payload as CartItem).filter(Boolean);
+            if (savedItems.length) setItems(savedItems);
+          }
+        } catch (err) {
+          console.error("Failed to load cart from Supabase:", err);
+        }
       }
     });
+  }, [hydrated]); // Only run once on hydration
+
+  // Sync cart to Supabase with debouncing to prevent race conditions
+  useEffect(() => {
+    if (!hydrated || syncInProgressRef.current) return;
+    
+    // Clear any pending sync
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current);
+    }
+
+    // Debounce sync to prevent too frequent updates
+    syncTimeoutRef.current = setTimeout(() => {
+      const supabase = createBrowserSupabaseClient();
+      if (!supabase) return;
+
+      syncInProgressRef.current = true;
+      
+      supabase.auth.getUser().then(async ({ data }) => {
+        if (!data.user) {
+          syncInProgressRef.current = false;
+          return;
+        }
+
+        try {
+          // Delete old cart items
+          await supabase.from("cart_items").delete().eq("user_id", data.user.id);
+          
+          // Insert new cart items if any
+          if (items.length > 0) {
+            await supabase.from("cart_items").insert(items.map((item) => ({
+              user_id: data.user.id,
+              product_id: item.productId,
+              quantity: item.quantity,
+              payload: item
+            })));
+          }
+        } catch (err) {
+          console.error("Failed to sync cart to Supabase:", err);
+          // Don't show error to user - local cart still works
+        } finally {
+          syncInProgressRef.current = false;
+        }
+      });
+    }, 500); // Wait 500ms after last change before syncing
+
+    return () => {
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current);
+      }
+    };
   }, [hydrated, items]);
 
   const value = useMemo<CartContextValue>(() => {

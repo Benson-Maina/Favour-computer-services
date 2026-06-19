@@ -31,16 +31,16 @@ export function CheckoutPageClient() {
       return;
     }
 
-    const form = formRef.current;
+    // Use customer data returned from server action instead of trying to extract from FormData
     saveStoredOrder({
       id: state.orderId ?? orderId,
-      customerName: String(new FormData(form ?? undefined).get("name") ?? ""),
-      customerEmail: String(new FormData(form ?? undefined).get("email") ?? ""),
-      customerPhone: String(new FormData(form ?? undefined).get("phone") ?? ""),
-      deliveryMethod: String(new FormData(form ?? undefined).get("deliveryMethod") ?? "pickup"),
-      shippingAddress: String(new FormData(form ?? undefined).get("address") ?? ""),
-      notes: String(new FormData(form ?? undefined).get("notes") ?? ""),
-      paymentReference: String(new FormData(form ?? undefined).get("paymentReference") ?? ""),
+      customerName: state.customerName ?? "",
+      customerEmail: state.customerEmail ?? "",
+      customerPhone: state.customerPhone ?? "",
+      deliveryMethod: state.deliveryMethod ?? "pickup",
+      shippingAddress: state.shippingAddress ?? "",
+      notes: state.notes ?? "",
+      paymentReference: state.paymentReference ?? "",
       paymentStatus: "Payment Submitted",
       status: "Payment Submitted",
       items,
