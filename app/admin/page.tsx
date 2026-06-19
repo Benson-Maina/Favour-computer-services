@@ -187,7 +187,10 @@ export default async function AdminPage() {
   }));
   const productUnits = new Map<string, number>();
   orderItems.forEach((row) => {
-    const product = Array.isArray((row as Row).products) ? (row as Row).products[0] as Row | undefined : objectValue((row as Row).products);
+    const rowProducts = (row as Row).products;
+    const product = Array.isArray(rowProducts)
+      ? (rowProducts as Row[])[0]
+      : objectValue(rowProducts);
     const name = text(product?.name);
     if (name) productUnits.set(name, (productUnits.get(name) ?? 0) + numberValue((row as Row).quantity));
   });
