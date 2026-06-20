@@ -1,12 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requirePermission } from "@/lib/admin-auth";
 import { business, getBusinessSettings } from "@/lib/data";
 import { adminEmailHtml, adminNotificationEmail, sendTransactionalEmail } from "@/lib/email";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { bookingSchema, checkoutSchema, contactSchema, inventoryAdjustmentSchema, newsletterSchema, orderStatusSchema, paymentReviewSchema, productAdminSchema, productInquirySchema, productLifecycleSchema } from "@/lib/validation";
+import { addressSchema, authLoginSchema, authRegisterSchema, bookingSchema, bookingStatusSchema, checkoutSchema, contactInquiryStatusSchema, contactSchema, deleteAddressSchema, inventoryAdjustmentSchema, newsletterSchema, orderStatusSchema, passwordResetSchema, passwordUpdateSchema, paymentReviewSchema, productAdminSchema, productInquirySchema, productLifecycleSchema, profileSchema, siteSettingsSchema } from "@/lib/validation";
 
 type ActionState = { 
   ok: boolean; 
@@ -21,6 +22,8 @@ type ActionState = {
   paymentReference?: string;
 };
 
+type Row = Record<string, unknown>;
+
 function adminUrl(path = "/admin") {
   const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ?? business.siteUrl;
   return new URL(path, baseUrl).toString();
@@ -31,8 +34,31 @@ function getString(formData: FormData, key: string) {
   return typeof value === "string" ? value : "";
 }
 
+function text(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
 function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+async function requireUser() {
+  const supabase = await createClient();
+  if (!supabase) throw new Error("Authentication is not configured.");
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user) throw new Error("You must be signed in.");
+  return { supabase, user: data.user };
+}
+
+async function ensureUserProfile(userId: string, fullName: string, phone?: string) {
+  const supabase = createAdminClient();
+  if (!supabase) return;
+  await supabase.from("users").upsert({
+    id: userId,
+    full_name: fullName,
+    phone: phone || null,
+    role: "customer"
+  }, { onConflict: "id" });
 }
 
 async function uploadStorageFile(bucket: string, folder: string, file: FormDataEntryValue | null) {
@@ -56,6 +82,168 @@ async function uploadStorageFile(bucket: string, folder: string, file: FormDataE
 
   const { data } = supabase.storage.from(bucket).getPublicUrl(path);
   return { path, publicUrl: data.publicUrl };
+}
+
+function storagePathFromPublicUrl(bucket: string, value: string) {
+  const marker = `/storage/v1/object/public/${bucket}/`;
+  const markerIndex = value.indexOf(marker);
+  if (markerIndex >= 0) return decodeURIComponent(value.slice(markerIndex + marker.length));
+  if (!/^https?:\/\//i.test(value) && value.includes("/")) return value;
+  return null;
+}
+
+async function removeStorageObjects(bucket: string, values: string[]) {
+  const supabase = createAdminClient();
+  if (!supabase) return;
+  const paths = Array.from(new Set(values.map((value) => storagePathFromPublicUrl(bucket, value)).filter((value): value is string => Boolean(value))));
+  if (!paths.length) return;
+  const { error } = await supabase.storage.from(bucket).remove(paths);
+  if (error) console.error(`${bucket} storage deletion error:`, error);
+}
+
+export async function loginCustomer(_: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = authLoginSchema.safeParse({
+    email: getString(formData, "email"),
+    password: getString(formData, "password"),
+    next: getString(formData, "next")
+  });
+  if (!parsed.success) return { ok: false, message: "Enter a valid email and password." };
+
+  const supabase = await createClient();
+  if (!supabase) return { ok: false, message: "Authentication is not configured." };
+  const { error } = await supabase.auth.signInWithPassword({
+    email: parsed.data.email,
+    password: parsed.data.password
+  });
+  if (error) return { ok: false, message: error.message };
+  redirect(parsed.data.next || "/account");
+}
+
+export async function registerCustomer(_: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = authRegisterSchema.safeParse({
+    fullName: getString(formData, "fullName"),
+    phone: getString(formData, "phone") || undefined,
+    email: getString(formData, "email"),
+    password: getString(formData, "password"),
+    confirmPassword: getString(formData, "confirmPassword")
+  });
+  if (!parsed.success) return { ok: false, message: "Check the registration details and password confirmation." };
+
+  const supabase = await createClient();
+  if (!supabase) return { ok: false, message: "Authentication is not configured." };
+  const redirectTo = `${process.env.NEXT_PUBLIC_SITE_URL ?? business.siteUrl}/auth/callback?next=/account`;
+  const { data, error } = await supabase.auth.signUp({
+    email: parsed.data.email,
+    password: parsed.data.password,
+    options: {
+      emailRedirectTo: redirectTo,
+      data: {
+        full_name: parsed.data.fullName,
+        phone: parsed.data.phone || ""
+      }
+    }
+  });
+  if (error) return { ok: false, message: error.message };
+  if (data.user) await ensureUserProfile(data.user.id, parsed.data.fullName, parsed.data.phone);
+  return { ok: true, message: data.session ? "Account created and signed in." : "Account created. Check your email to verify your account before signing in." };
+}
+
+export async function sendPasswordReset(_: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = passwordResetSchema.safeParse({ email: getString(formData, "email") });
+  if (!parsed.success) return { ok: false, message: "Enter a valid email address." };
+
+  const supabase = await createClient();
+  if (!supabase) return { ok: false, message: "Authentication is not configured." };
+  const redirectTo = `${process.env.NEXT_PUBLIC_SITE_URL ?? business.siteUrl}/auth/update-password`;
+  const { error } = await supabase.auth.resetPasswordForEmail(parsed.data.email, { redirectTo });
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, message: "Password reset email sent." };
+}
+
+export async function updatePassword(_: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = passwordUpdateSchema.safeParse({
+    password: getString(formData, "password"),
+    confirmPassword: getString(formData, "confirmPassword")
+  });
+  if (!parsed.success) return { ok: false, message: "Passwords must match and be at least 8 characters." };
+
+  const supabase = await createClient();
+  if (!supabase) return { ok: false, message: "Authentication is not configured." };
+  const { error } = await supabase.auth.updateUser({ password: parsed.data.password });
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, message: "Password updated. You can now continue to your account." };
+}
+
+export async function logoutCustomer(): Promise<void> {
+  const supabase = await createClient();
+  if (supabase) await supabase.auth.signOut();
+  redirect("/account/login");
+}
+
+export async function saveProfile(_: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = profileSchema.safeParse({
+    fullName: getString(formData, "fullName"),
+    phone: getString(formData, "phone") || undefined
+  });
+  if (!parsed.success) return { ok: false, message: "Enter a valid name and phone number." };
+
+  const { user } = await requireUser();
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable. Please try again." };
+  const { error } = await supabase.from("users").upsert({
+    id: user.id,
+    full_name: parsed.data.fullName,
+    phone: parsed.data.phone || null,
+    role: "customer"
+  }, { onConflict: "id" });
+  if (error) return { ok: false, message: "Profile could not be saved." };
+  revalidatePath("/account");
+  return { ok: true, message: "Profile saved." };
+}
+
+export async function saveAddress(_: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = addressSchema.safeParse({
+    id: getString(formData, "id") || undefined,
+    label: getString(formData, "label"),
+    recipientName: getString(formData, "recipientName"),
+    phone: getString(formData, "phone"),
+    addressLine: getString(formData, "addressLine"),
+    city: getString(formData, "city") || "Nairobi",
+    isDefault: formData.get("isDefault") === "on"
+  });
+  if (!parsed.success) return { ok: false, message: "Address details are incomplete." };
+
+  const { user } = await requireUser();
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable. Please try again." };
+  if (parsed.data.isDefault) await supabase.from("addresses").update({ is_default: false }).eq("user_id", user.id);
+  const payload = {
+    user_id: user.id,
+    label: parsed.data.label,
+    recipient_name: parsed.data.recipientName,
+    phone: parsed.data.phone,
+    address_line: parsed.data.addressLine,
+    city: parsed.data.city,
+    is_default: Boolean(parsed.data.isDefault)
+  };
+  const result = parsed.data.id
+    ? await supabase.from("addresses").update(payload).eq("id", parsed.data.id).eq("user_id", user.id)
+    : await supabase.from("addresses").insert(payload);
+  if (result.error) return { ok: false, message: "Address could not be saved." };
+  revalidatePath("/account");
+  return { ok: true, message: "Address saved." };
+}
+
+export async function deleteAddress(_: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = deleteAddressSchema.safeParse({ id: getString(formData, "id") });
+  if (!parsed.success) return { ok: false, message: "Invalid address." };
+  const { user } = await requireUser();
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable. Please try again." };
+  const { error } = await supabase.from("addresses").delete().eq("id", parsed.data.id).eq("user_id", user.id);
+  if (error) return { ok: false, message: "Address could not be deleted." };
+  revalidatePath("/account");
+  return { ok: true, message: "Address deleted." };
 }
 
 function parseImageList(value: string) {
@@ -653,9 +841,10 @@ export async function saveProduct(_: ActionState, formData: FormData): Promise<A
         .getAll("productImages")
         .map((file) => uploadStorageFile("products", parsed.data.slug, file))
     );
-    const uploadedUrls = uploadedImages.map((image) => image?.publicUrl).filter((url): url is string => Boolean(url));
+    const uploadedEntries = uploadedImages
+      .filter((image): image is { path: string; publicUrl: string } => Boolean(image?.publicUrl));
     const featuredImage = getString(formData, "featuredImage");
-    const images = [...imageUrls.filter((url) => url !== featuredImage), ...uploadedUrls];
+    const images = [...imageUrls.filter((url) => url !== featuredImage), ...uploadedEntries.map((image) => image.publicUrl)];
     if (featuredImage) images.unshift(featuredImage);
 
     const { data: savedProduct, error: productError } = await supabase.from("products").upsert({
@@ -684,16 +873,25 @@ export async function saveProduct(_: ActionState, formData: FormData): Promise<A
       console.error("Product save error:", productError);
       return { ok: false, message: "Product could not be saved." };
     }
-    if (savedProduct?.id && images.length) {
+    if (savedProduct?.id) {
+      const { data: previousImages } = await supabase.from("product_images").select("storage_path,public_url").eq("product_id", savedProduct.id);
+      const desired = new Set(images);
+      const removedStorageValues = (previousImages ?? [])
+        .flatMap((image) => [text((image as Row).storage_path), text((image as Row).public_url)])
+        .filter((value) => value && !desired.has(value));
+      await removeStorageObjects("products", removedStorageValues);
       await supabase.from("product_images").delete().eq("product_id", savedProduct.id);
-      await supabase.from("product_images").insert(images.map((url, index) => ({
-        product_id: savedProduct.id,
-        storage_path: url,
-        public_url: url,
-        alt_text: parsed.data.name,
-        sort_order: index,
-        is_primary: index === 0
-      })));
+      if (images.length) {
+        const uploadedByUrl = new Map(uploadedEntries.map((image) => [image.publicUrl, image.path]));
+        await supabase.from("product_images").insert(images.map((url, index) => ({
+          product_id: savedProduct.id,
+          storage_path: uploadedByUrl.get(url) ?? storagePathFromPublicUrl("products", url) ?? url,
+          public_url: url,
+          alt_text: parsed.data.name,
+          sort_order: index,
+          is_primary: index === 0
+        })));
+      }
     }
     await supabase.rpc("log_audit", {
       action_input: "Product Saved",
@@ -717,7 +915,11 @@ export async function updateProductLifecycle(_: ActionState, formData: FormData)
 
   const supabase = createAdminClient();
   if (supabase) {
-    if (parsed.data.action === "delete") await supabase.from("products").delete().eq("id", parsed.data.productId);
+    if (parsed.data.action === "delete") {
+      const { data: images } = await supabase.from("product_images").select("storage_path,public_url").eq("product_id", parsed.data.productId);
+      await removeStorageObjects("products", (images ?? []).flatMap((image) => [text((image as Row).storage_path), text((image as Row).public_url)]).filter(Boolean));
+      await supabase.from("products").delete().eq("id", parsed.data.productId);
+    }
     if (parsed.data.action === "archive") await supabase.from("products").update({ status: "archived", archived_at: new Date().toISOString() }).eq("id", parsed.data.productId);
     if (parsed.data.action === "restore") await supabase.from("products").update({ status: "active", archived_at: null }).eq("id", parsed.data.productId);
     if (parsed.data.action === "duplicate") {
@@ -737,4 +939,86 @@ export async function updateProductLifecycle(_: ActionState, formData: FormData)
   revalidatePath("/admin");
   revalidatePath("/shop");
   return { ok: true, message: "Product action completed." };
+}
+
+export async function updateBookingStatus(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requirePermission("orders:write");
+  const parsed = bookingStatusSchema.safeParse({
+    bookingId: getString(formData, "bookingId"),
+    status: getString(formData, "status")
+  });
+  if (!parsed.success) return { ok: false, message: "Choose a valid booking status." };
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable. Please try again." };
+  const { error } = await supabase.from("bookings").update({ status: parsed.data.status }).eq("id", parsed.data.bookingId);
+  if (error) return { ok: false, message: "Booking status could not be updated." };
+  await supabase.rpc("log_audit", {
+    action_input: "Booking Updated",
+    entity_input: parsed.data.bookingId,
+    details_input: `Booking status changed to ${parsed.data.status}`,
+    user_name_input: "Admin"
+  });
+  revalidatePath("/admin");
+  return { ok: true, message: "Booking status updated." };
+}
+
+export async function updateContactInquiryStatus(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requirePermission("customers:read");
+  const parsed = contactInquiryStatusSchema.safeParse({
+    inquiryId: getString(formData, "inquiryId"),
+    status: getString(formData, "status")
+  });
+  if (!parsed.success) return { ok: false, message: "Choose a valid inquiry status." };
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable. Please try again." };
+  const { error } = await supabase.from("contact_inquiries").update({ status: parsed.data.status }).eq("id", parsed.data.inquiryId);
+  if (error) return { ok: false, message: "Inquiry status could not be updated." };
+  await supabase.rpc("log_audit", {
+    action_input: "Contact Inquiry Updated",
+    entity_input: parsed.data.inquiryId,
+    details_input: `Inquiry status changed to ${parsed.data.status}`,
+    user_name_input: "Admin"
+  });
+  revalidatePath("/admin");
+  return { ok: true, message: "Inquiry status updated." };
+}
+
+export async function saveSiteSettings(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requirePermission("dashboard:read");
+  const parsed = siteSettingsSchema.safeParse({
+    businessName: getString(formData, "businessName"),
+    businessLocation: getString(formData, "businessLocation"),
+    businessPhone: getString(formData, "businessPhone"),
+    businessWhatsapp: getString(formData, "businessWhatsapp"),
+    businessEmail: getString(formData, "businessEmail"),
+    paybillNumber: getString(formData, "paybillNumber"),
+    paybillAccount: getString(formData, "paybillAccount"),
+    siteUrl: getString(formData, "siteUrl"),
+    businessDescription: getString(formData, "businessDescription")
+  });
+  if (!parsed.success) return { ok: false, message: "Site settings are incomplete." };
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable. Please try again." };
+  const rows = [
+    ["business_name", parsed.data.businessName],
+    ["business_location", parsed.data.businessLocation],
+    ["business_phone", parsed.data.businessPhone],
+    ["business_whatsapp", parsed.data.businessWhatsapp],
+    ["business_email", parsed.data.businessEmail],
+    ["paybill_number", parsed.data.paybillNumber],
+    ["paybill_account", parsed.data.paybillAccount],
+    ["site_url", parsed.data.siteUrl],
+    ["business_description", parsed.data.businessDescription]
+  ].map(([key, value]) => ({ key, value }));
+  const { error } = await supabase.from("site_settings").upsert(rows, { onConflict: "key" });
+  if (error) return { ok: false, message: "Site settings could not be saved." };
+  await supabase.rpc("log_audit", {
+    action_input: "Site Settings Updated",
+    entity_input: "site_settings",
+    details_input: "Business contact and payment settings updated.",
+    user_name_input: "Admin"
+  });
+  revalidatePath("/");
+  revalidatePath("/admin");
+  return { ok: true, message: "Site settings saved." };
 }

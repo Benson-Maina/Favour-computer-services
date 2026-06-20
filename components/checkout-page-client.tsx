@@ -2,7 +2,6 @@
 
 import { useActionState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Loader2, LockKeyhole } from "lucide-react";
 import { toast } from "sonner";
 import { submitCheckout } from "@/app/actions";
@@ -14,10 +13,9 @@ import { useCart } from "@/lib/cart-context";
 import { formatCurrency } from "@/lib/utils";
 import type { BusinessSettings } from "@/lib/data";
 
-type State = { ok: boolean; message: string; orderId?: string };
+type State = { ok: boolean; message: string; orderId?: string; customerName?: string; customerEmail?: string; paymentReference?: string };
 
 export function CheckoutPageClient({ business }: { business: BusinessSettings }) {
-  const router = useRouter();
   const { items, subtotal, hydrated, clearCart } = useCart();
   const orderId = useMemo(() => crypto.randomUUID(), []);
   const formRef = useRef<HTMLFormElement>(null);
@@ -32,14 +30,34 @@ export function CheckoutPageClient({ business }: { business: BusinessSettings })
 
     toast.success("Order placed successfully");
     clearCart();
-    router.push("/account/orders");
-  }, [clearCart, items, orderId, router, state, subtotal]);
+  }, [clearCart, state]);
 
   if (!hydrated) {
     return <section className="container py-12"><div className="h-96 rounded-md bg-secondary" /></section>;
   }
 
   if (!items.length) {
+    if (state.ok && state.orderId) {
+      return (
+        <section className="container grid min-h-[60vh] place-items-center py-16 text-center">
+          <Card className="w-full max-w-xl">
+            <CardContent className="p-8">
+              <h1 className="text-4xl font-black">Order Submitted</h1>
+              <p className="mt-3 text-muted-foreground">Your order was saved and is awaiting Paybill verification.</p>
+              <div className="mt-6 rounded-md bg-secondary p-4 text-left text-sm">
+                <p><strong>Order ID:</strong> {state.orderId}</p>
+                <p><strong>Payment reference:</strong> {state.paymentReference}</p>
+                <p><strong>Email:</strong> {state.customerEmail}</p>
+              </div>
+              <div className="mt-6 flex flex-wrap justify-center gap-3">
+                <Button asChild><Link href="/shop">Continue Shopping</Link></Button>
+                <Button asChild variant="outline"><Link href="/account/orders">View Account Orders</Link></Button>
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+      );
+    }
     return (
       <section className="container py-16 text-center">
         <h1 className="text-4xl font-black">Checkout</h1>

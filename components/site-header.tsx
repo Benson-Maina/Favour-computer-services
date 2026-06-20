@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { Menu, UserRound } from "lucide-react";
+import { UserRound } from "lucide-react";
 import { getBusinessSettings, getCategories, getProducts } from "@/lib/data";
 import { Button } from "@/components/ui/button";
 import { CartIconLink } from "@/components/cart-icon-link";
+import { MobileMenu } from "@/components/mobile-menu";
 import { SearchPanel } from "@/components/search-panel";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -14,7 +15,7 @@ const nav = [
   ["Blog", "/blog"],
   ["About", "/about"],
   ["Contact", "/contact"]
-];
+] as const;
 
 export async function SiteHeader() {
   const [business, categories, products] = await Promise.all([getBusinessSettings(), getCategories(), getProducts({ limit: 20 })]);
@@ -45,9 +46,7 @@ export async function SiteHeader() {
             <Link href="/account"><UserRound className="size-5" /></Link>
           </Button>
           <ThemeToggle />
-          <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Menu">
-            <Menu className="size-5" />
-          </Button>
+          <MobileMenu links={nav} />
         </div>
       </div>
       <div className="hidden border-t bg-secondary/40 py-2 md:block">

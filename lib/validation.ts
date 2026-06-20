@@ -91,3 +91,73 @@ export const productLifecycleSchema = z.object({
   productId: z.string().min(1),
   action: z.enum(["delete", "archive", "restore", "duplicate"])
 });
+
+export const authLoginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(6).max(200),
+  next: z.string().optional()
+});
+
+export const authRegisterSchema = z.object({
+  fullName: z.string().min(2).max(120),
+  phone: z.string().min(7).max(30).optional(),
+  email: z.string().email(),
+  password: z.string().min(8).max(200),
+  confirmPassword: z.string().min(8).max(200)
+}).refine((value) => value.password === value.confirmPassword, {
+  message: "Passwords do not match.",
+  path: ["confirmPassword"]
+});
+
+export const passwordResetSchema = z.object({
+  email: z.string().email()
+});
+
+export const passwordUpdateSchema = z.object({
+  password: z.string().min(8).max(200),
+  confirmPassword: z.string().min(8).max(200)
+}).refine((value) => value.password === value.confirmPassword, {
+  message: "Passwords do not match.",
+  path: ["confirmPassword"]
+});
+
+export const profileSchema = z.object({
+  fullName: z.string().min(2).max(120),
+  phone: z.string().min(7).max(30).optional()
+});
+
+export const addressSchema = z.object({
+  id: z.string().optional(),
+  label: z.string().min(2).max(80),
+  recipientName: z.string().min(2).max(120),
+  phone: z.string().min(7).max(30),
+  addressLine: z.string().min(5).max(500),
+  city: z.string().min(2).max(80).default("Nairobi"),
+  isDefault: z.coerce.boolean().optional()
+});
+
+export const deleteAddressSchema = z.object({
+  id: z.string().min(1)
+});
+
+export const bookingStatusSchema = z.object({
+  bookingId: z.string().min(1),
+  status: z.enum(["new", "contacted", "scheduled", "completed", "cancelled"])
+});
+
+export const contactInquiryStatusSchema = z.object({
+  inquiryId: z.string().min(1),
+  status: z.enum(["new", "read", "replied", "closed"])
+});
+
+export const siteSettingsSchema = z.object({
+  businessName: z.string().min(2).max(160),
+  businessLocation: z.string().min(5).max(240),
+  businessPhone: z.string().min(7).max(40),
+  businessWhatsapp: z.string().min(7).max(40),
+  businessEmail: z.string().email(),
+  paybillNumber: z.string().min(3).max(40),
+  paybillAccount: z.string().min(2).max(80),
+  siteUrl: z.string().url(),
+  businessDescription: z.string().min(10).max(500)
+});

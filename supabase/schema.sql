@@ -341,6 +341,7 @@ create table public.contact_inquiries (
   phone text not null,
   subject text not null,
   message text not null,
+  status text not null default 'new' check (status in ('new', 'read', 'replied', 'closed')),
   created_at timestamptz not null default now()
 );
 
@@ -370,6 +371,30 @@ as $$
       and role in ('super_admin', 'admin', 'staff')
   );
 $$;
+
+create or replace function public.handle_new_auth_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.users (id, full_name, phone, role)
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data ->> 'full_name', split_part(new.email, '@', 1), 'Customer'),
+    nullif(new.raw_user_meta_data ->> 'phone', ''),
+    'customer'
+  )
+  on conflict (id) do nothing;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+after insert on auth.users
+for each row execute function public.handle_new_auth_user();
 
 alter table public.users enable row level security;
 alter table public.addresses enable row level security;

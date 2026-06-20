@@ -429,8 +429,12 @@ create table if not exists public.contact_inquiries (
   phone text not null,
   subject text not null,
   message text not null,
+  status text not null default 'new' check (status in ('new', 'read', 'replied', 'closed')),
   created_at timestamptz not null default now()
 );
+
+alter table if exists public.contact_inquiries
+  add column if not exists status text not null default 'new' check (status in ('new', 'read', 'replied', 'closed'));
 
 create table if not exists public.email_delivery_logs (
   id uuid primary key default uuid_generate_v4(),
@@ -464,6 +468,30 @@ as $$
       and role in ('super_admin', 'admin', 'staff')
   );
 $$;
+
+create or replace function public.handle_new_auth_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.users (id, full_name, phone, role)
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data ->> 'full_name', split_part(new.email, '@', 1), 'Customer'),
+    nullif(new.raw_user_meta_data ->> 'phone', ''),
+    'customer'
+  )
+  on conflict (id) do nothing;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+after insert on auth.users
+for each row execute function public.handle_new_auth_user();
 
 -- Inventory and audit helper functions
 create or replace function public.adjust_product_stock(product_id_input uuid, stock_change_input integer)

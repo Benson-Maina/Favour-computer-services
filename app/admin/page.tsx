@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { AdminDashboard } from "@/components/admin-dashboard";
 import { requireAdminPage } from "@/lib/admin-auth";
 import { orderStatusLabels, orderStatuses } from "@/lib/admin-analytics";
+import { getBusinessSettings } from "@/lib/data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { AdminActivity, Booking, ChartPoint, InventoryAlert, Order, Payment, PaymentLog, Product } from "@/lib/types";
 
@@ -113,7 +114,7 @@ function chartFromOrders(orders: Order[]): ChartPoint[] {
 async function loadDashboardData() {
   const supabase = createAdminClient();
   if (!supabase) {
-    return { products: [], orders: [], payments: [], paymentLogs: [], bookings: [], activities: [], users: [], orderItems: [], blogPosts: [], contactInquiryCount: 0 };
+    return { products: [], orders: [], payments: [], paymentLogs: [], bookings: [], activities: [], users: [], orderItems: [], blogPosts: [], contactInquiries: [] };
   }
 
   const [productsResult, ordersResult, paymentsResult, paymentLogsResult, bookingsResult, auditResult, usersResult, orderItemsResult, blogPostsResult, inquiriesResult] = await Promise.all([
@@ -126,7 +127,7 @@ async function loadDashboardData() {
     supabase.from("users").select("id,created_at").order("created_at", { ascending: true }),
     supabase.from("order_items").select("quantity, products(name)").limit(1000),
     supabase.from("blog_posts").select("id,title,published,draft,scheduled_at,blog_categories(name)").order("created_at", { ascending: false }).limit(6),
-    supabase.from("contact_inquiries").select("id", { count: "exact", head: true })
+    supabase.from("contact_inquiries").select("*").order("created_at", { ascending: false }).limit(20)
   ]);
 
   const products = (productsResult.data ?? []).map((row) => mapProduct(row as Row));
@@ -170,13 +171,25 @@ async function loadDashboardData() {
     users: usersResult.data ?? [],
     orderItems: orderItemsResult.data ?? [],
     blogPosts: blogPostsResult.data ?? [],
-    contactInquiryCount: inquiriesResult.count ?? 0
+    contactInquiries: (inquiriesResult.data ?? []).map((row) => ({
+      id: text((row as Row).id),
+      name: text((row as Row).name),
+      email: text((row as Row).email),
+      phone: text((row as Row).phone),
+      subject: text((row as Row).subject),
+      message: text((row as Row).message),
+      status: text((row as Row).status, "new"),
+      createdAt: text((row as Row).created_at, new Date().toISOString())
+    }))
   };
 }
 
 export default async function AdminPage() {
   await requireAdminPage("dashboard:read");
-  const { products, orders, payments, paymentLogs, bookings, activities, users, orderItems, blogPosts, contactInquiryCount } = await loadDashboardData();
+  const [{ products, orders, payments, paymentLogs, bookings, activities, users, orderItems, blogPosts, contactInquiries }, business] = await Promise.all([
+    loadDashboardData(),
+    getBusinessSettings()
+  ]);
   const completedOrders = orders.filter((order) => ["payment_verified", "completed"].includes(order.status));
   const pendingOrders = orders.filter((order) => ["pending_payment", "payment_submitted"].includes(order.status));
   const revenueChart = chartFromOrders(completedOrders);
@@ -241,7 +254,8 @@ export default async function AdminPage() {
         scheduledAt: text((row as Row).scheduled_at),
         category: text(objectValue((row as Row).blog_categories).name)
       }))}
-      contactInquiryCount={contactInquiryCount}
+      contactInquiries={contactInquiries}
+      business={business}
     />
   );
 }

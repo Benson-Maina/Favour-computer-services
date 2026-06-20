@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -37,7 +37,8 @@ export default async function OrderDetailsPage({ params }: { params: Promise<{ i
   const serverSupabase = await createClient();
   const { data: userData } = serverSupabase ? await serverSupabase.auth.getUser() : { data: { user: null } };
   const supabase = createAdminClient();
-  if (!supabase || !userData.user) notFound();
+  if (!userData.user) redirect(`/account/login?next=/account/orders/${id}`);
+  if (!supabase) notFound();
 
   const { data: order } = await supabase
     .from("orders")

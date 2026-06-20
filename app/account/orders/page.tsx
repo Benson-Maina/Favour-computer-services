@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { PackageSearch } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,7 @@ function numberValue(value: unknown) {
 export default async function OrdersPage() {
   const serverSupabase = await createClient();
   const { data: userData } = serverSupabase ? await serverSupabase.auth.getUser() : { data: { user: null } };
+  if (!userData.user) redirect("/account/login?next=/account/orders");
   const supabase = createAdminClient();
   const { data } = supabase && userData.user
     ? await supabase.from("orders").select("*, order_items(id)").eq("user_id", userData.user.id).order("created_at", { ascending: false })

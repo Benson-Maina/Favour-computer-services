@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
 import { AlertTriangle, Boxes, CalendarCheck, CheckCircle2, CreditCard, Newspaper, PackagePlus, ShoppingBag, TrendingUp, Users } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { adjustInventory, reviewPayment, saveProduct, saveSiteSettings, updateBookingStatus, updateContactInquiryStatus, updateOrderStatus, updateProductLifecycle } from "@/app/actions";
 import { ActionForm } from "@/components/action-form-status";
 import { ProductImageManager } from "@/components/product-image-manager";
 import { Badge } from "@/components/ui/badge";
@@ -11,10 +11,21 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { adjustInventory, reviewPayment, saveProduct, updateOrderStatus, updateProductLifecycle } from "@/app/actions";
 import { orderStatusLabels, orderStatuses } from "@/lib/admin-analytics";
-import { formatCurrency } from "@/lib/utils";
+import type { BusinessSettings } from "@/lib/data";
 import type { AdminActivity, Booking, ChartPoint, InventoryAlert, Order, Payment, PaymentLog, Product } from "@/lib/types";
+import { formatCurrency } from "@/lib/utils";
+
+type ContactInquiry = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  subject: string;
+  message: string;
+  status: string;
+  createdAt: string;
+};
 
 type DashboardProps = {
   metrics: {
@@ -43,27 +54,33 @@ type DashboardProps = {
   inventoryAlerts: InventoryAlert[];
   activities: AdminActivity[];
   blogPosts: { id: string; title: string; published: boolean; draft: boolean; scheduledAt: string; category: string }[];
-  contactInquiryCount: number;
+  contactInquiries: ContactInquiry[];
+  business: BusinessSettings;
 };
 
 const widgetIcons = [TrendingUp, ShoppingBag, AlertTriangle, Boxes, CheckCircle2, AlertTriangle, Boxes, AlertTriangle, AlertTriangle, Users];
 
-export function AdminDashboard({
-  metrics,
-  revenueChart,
-  ordersChart,
-  customerGrowthChart,
-  productPerformanceChart,
-  products,
-  orders,
-  payments,
-  paymentLogs,
-  bookings,
-  inventoryAlerts,
-  activities,
-  blogPosts,
-  contactInquiryCount
-}: DashboardProps) {
+export function AdminDashboard(props: DashboardProps) {
+  const {
+    metrics,
+    revenueChart,
+    ordersChart,
+    customerGrowthChart,
+    productPerformanceChart,
+    products,
+    orders,
+    payments,
+    paymentLogs,
+    bookings,
+    inventoryAlerts,
+    activities,
+    blogPosts,
+    contactInquiries,
+    business
+  } = props;
+
+  const [selectedProductId, setSelectedProductId] = useState(products[0]?.id ?? "");
+  const selectedProduct = products.find((product) => product.id === selectedProductId) ?? products[0];
   const widgets = [
     ["Total Revenue", formatCurrency(metrics.totalRevenue)],
     ["Total Orders", metrics.totalOrders],
@@ -76,7 +93,7 @@ export function AdminDashboard({
     ["Out Of Stock Products", metrics.outOfStockProducts],
     ["Total Customers", metrics.totalCustomers]
   ];
-  const firstProduct = products[0];
+  const firstProduct = selectedProduct;
   const productForm = firstProduct ?? {
     id: "",
     name: "",
@@ -115,15 +132,13 @@ export function AdminDashboard({
         {widgets.map(([label, value], index) => {
           const Icon = widgetIcons[index];
           return (
-            <motion.div key={String(label)} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.04 }}>
-              <Card className="h-full overflow-hidden">
-                <CardContent className="p-5">
-                  <Icon className="mb-4 size-5 text-primary" />
-                  <p className="text-sm text-muted-foreground">{label}</p>
-                  <p className="mt-1 text-2xl font-black">{value}</p>
-                </CardContent>
-              </Card>
-            </motion.div>
+            <Card key={String(label)} className="h-full">
+              <CardContent className="p-5">
+                <Icon className="mb-4 size-5 text-primary" />
+                <p className="text-sm text-muted-foreground">{label}</p>
+                <p className="mt-1 text-2xl font-black">{value}</p>
+              </CardContent>
+            </Card>
           );
         })}
       </div>
@@ -148,7 +163,7 @@ export function AdminDashboard({
                   <div className="flex flex-wrap justify-between gap-3">
                     <div>
                       <p className="font-bold">{order.customerName}</p>
-                      <p className="text-sm text-muted-foreground">{order.id} · {formatCurrency(order.total)} · {order.customerPhone}</p>
+                      <p className="text-sm text-muted-foreground">{order.id} | {formatCurrency(order.total)} | {order.customerPhone}</p>
                     </div>
                     <Badge>{orderStatusLabels[order.status]}</Badge>
                   </div>
@@ -168,10 +183,7 @@ export function AdminDashboard({
 
         <Card>
           <CardContent className="p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-xl font-bold">Recent Activity</h2>
-              <Badge variant="outline">Live feed</Badge>
-            </div>
+            <h2 className="mb-4 text-xl font-bold">Recent Activity</h2>
             <div className="space-y-4">
               {activities.length ? activities.map((activity) => (
                 <div key={activity.id} className="border-l-2 border-primary pl-4">
@@ -198,7 +210,7 @@ export function AdminDashboard({
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="font-bold">{product.name}</p>
-                      <p className="text-sm text-muted-foreground">SKU {product.sku} · {product.supplierName} · {product.supplierContact}</p>
+                      <p className="text-sm text-muted-foreground">SKU {product.sku} | {product.supplierName} | {product.supplierContact}</p>
                     </div>
                     <Badge variant={product.stock <= product.lowStockThreshold ? "default" : "outline"}>{product.stock} in stock</Badge>
                   </div>
@@ -237,14 +249,14 @@ export function AdminDashboard({
               <h2 className="text-xl font-bold">Paybill Verification</h2>
             </div>
             <div className="space-y-4">
-              {payments.map((payment) => (
+              {payments.length ? payments.map((payment) => (
                 <div key={payment.id} className="rounded-md border p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="font-bold">{payment.transactionCode}</p>
-                      <p className="text-sm text-muted-foreground">{payment.orderId} · {formatCurrency(payment.amount)}</p>
+                      <p className="text-sm text-muted-foreground">{payment.orderId} | {formatCurrency(payment.amount)}</p>
                     </div>
-                    <Button asChild variant="outline" size="sm"><a href={payment.confirmationUrl} target="_blank">View Screenshot</a></Button>
+                    {payment.confirmationUrl ? <Button asChild variant="outline" size="sm"><a href={payment.confirmationUrl} target="_blank">View Screenshot</a></Button> : null}
                   </div>
                   <ActionForm action={reviewPayment} buttonLabel="Submit Review" className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
                     <input type="hidden" name="paymentId" value={payment.id} />
@@ -257,7 +269,7 @@ export function AdminDashboard({
                     <input type="hidden" name="actor" value="Admin" />
                   </ActionForm>
                 </div>
-              ))}
+              )) : <EmptyState title="No payments awaiting review." />}
             </div>
           </CardContent>
         </Card>
@@ -266,13 +278,13 @@ export function AdminDashboard({
           <CardContent className="p-5">
             <h2 className="mb-4 text-xl font-bold">Payment Logs</h2>
             <div className="space-y-3">
-              {paymentLogs.map((log) => (
+              {paymentLogs.length ? paymentLogs.map((log) => (
                 <div key={log.id} className="rounded-md bg-secondary/50 p-3 text-sm">
-                  <p className="font-semibold capitalize">{log.action} · {log.orderId}</p>
+                  <p className="font-semibold capitalize">{log.action} | {log.orderId}</p>
                   <p className="text-muted-foreground">{log.note}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{log.actor} · {new Date(log.createdAt).toLocaleString()}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{log.actor} | {new Date(log.createdAt).toLocaleString()}</p>
                 </div>
-              ))}
+              )) : <EmptyState title="No payment logs yet." />}
             </div>
           </CardContent>
         </Card>
@@ -285,6 +297,14 @@ export function AdminDashboard({
               <PackagePlus className="size-5 text-primary" />
               <h2 className="text-xl font-bold">Product Management</h2>
             </div>
+            {products.length ? (
+              <label className="mb-4 grid gap-2 text-sm font-medium">
+                Product
+                <select value={selectedProductId || products[0].id} onChange={(event) => setSelectedProductId(event.target.value)} className="h-10 rounded-md border bg-background px-3 text-sm">
+                  {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
+                </select>
+              </label>
+            ) : null}
             <ActionForm action={saveProduct} buttonLabel={firstProduct ? "Save Product" : "Create Product"}>
               <Input name="name" defaultValue={productForm.name} placeholder="Name" />
               <div className="grid gap-3 sm:grid-cols-2">
@@ -350,16 +370,22 @@ export function AdminDashboard({
               <h2 className="text-xl font-bold">Booking Management</h2>
             </div>
             <div className="space-y-3">
-              {bookings.map((booking) => (
+              {bookings.length ? bookings.map((booking) => (
                 <div key={booking.id} className="rounded-md border p-3">
                   <div className="flex items-center justify-between gap-3">
                     <p className="font-bold">{booking.service}</p>
                     <Badge variant="outline">{booking.status}</Badge>
                   </div>
-                  <p className="text-sm text-muted-foreground">{booking.name} · {booking.phone}</p>
+                  <p className="text-sm text-muted-foreground">{booking.name} | {booking.phone}</p>
                   <p className="mt-2 text-sm">{booking.message}</p>
+                  <ActionForm action={updateBookingStatus} buttonLabel="Update Booking" className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
+                    <input type="hidden" name="bookingId" value={booking.id} />
+                    <select name="status" defaultValue={booking.status} className="h-10 rounded-md border bg-background px-3 text-sm">
+                      {(["new", "contacted", "scheduled", "completed", "cancelled"] as const).map((status) => <option key={status} value={status}>{status}</option>)}
+                    </select>
+                  </ActionForm>
                 </div>
-              ))}
+              )) : <EmptyState title="No bookings yet." />}
             </div>
           </CardContent>
         </Card>
@@ -374,14 +400,59 @@ export function AdminDashboard({
               {blogPosts.length ? blogPosts.map((post) => (
                 <div key={post.id} className="rounded-md border p-3">
                   <p className="font-semibold">{post.title}</p>
-                  <p className="text-sm text-muted-foreground">{post.category || "Uncategorized"} Â· {post.published ? "Published" : post.scheduledAt ? "Scheduled" : post.draft ? "Draft" : "Unpublished"}</p>
+                  <p className="text-sm text-muted-foreground">{post.category || "Uncategorized"} | {post.published ? "Published" : post.scheduledAt ? "Scheduled" : post.draft ? "Draft" : "Unpublished"}</p>
                 </div>
               )) : <EmptyState title="No blog posts yet." />}
-              <div className="rounded-md border p-3">
-                <p className="font-semibold">Contact inquiries</p>
-                <p className="text-sm text-muted-foreground">{contactInquiryCount} submissions in Supabase</p>
-              </div>
             </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="mt-6 grid gap-5 xl:grid-cols-[1fr_1fr]">
+        <Card>
+          <CardContent className="p-5">
+            <h2 className="mb-4 text-xl font-bold">Contact Inquiries</h2>
+            <div className="space-y-3">
+              {contactInquiries.length ? contactInquiries.map((inquiry) => (
+                <div key={inquiry.id} className="rounded-md border p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold">{inquiry.subject}</p>
+                      <p className="text-sm text-muted-foreground">{inquiry.name} | {inquiry.phone} | {inquiry.email}</p>
+                    </div>
+                    <Badge variant="outline">{inquiry.status}</Badge>
+                  </div>
+                  <p className="mt-2 text-sm">{inquiry.message}</p>
+                  <ActionForm action={updateContactInquiryStatus} buttonLabel="Update Inquiry" className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
+                    <input type="hidden" name="inquiryId" value={inquiry.id} />
+                    <select name="status" defaultValue={inquiry.status} className="h-10 rounded-md border bg-background px-3 text-sm">
+                      {(["new", "read", "replied", "closed"] as const).map((status) => <option key={status} value={status}>{status}</option>)}
+                    </select>
+                  </ActionForm>
+                </div>
+              )) : <EmptyState title="No contact inquiries yet." />}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-5">
+            <h2 className="mb-4 text-xl font-bold">Site Settings</h2>
+            <ActionForm action={saveSiteSettings} buttonLabel="Save Settings">
+              <Input name="businessName" defaultValue={business.name} placeholder="Business name" />
+              <Input name="businessLocation" defaultValue={business.location} placeholder="Location" />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input name="businessPhone" defaultValue={business.phone} placeholder="Phone" />
+                <Input name="businessWhatsapp" defaultValue={business.whatsapp} placeholder="WhatsApp" />
+              </div>
+              <Input name="businessEmail" type="email" defaultValue={business.email} placeholder="Email" />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input name="paybillNumber" defaultValue={business.paybill} placeholder="Paybill" />
+                <Input name="paybillAccount" defaultValue={business.account} placeholder="Account" />
+              </div>
+              <Input name="siteUrl" defaultValue={business.siteUrl} placeholder="Site URL" />
+              <Textarea name="businessDescription" defaultValue={business.description} placeholder="Business description" />
+            </ActionForm>
           </CardContent>
         </Card>
       </div>
