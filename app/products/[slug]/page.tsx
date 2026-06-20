@@ -1,13 +1,17 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MessageCircle, Star, Zap } from "lucide-react";
 import { AddToCartButton } from "@/components/add-to-cart-button";
+import { ActionForm } from "@/components/action-form-status";
 import { ProductCard } from "@/components/product-card";
+import { ProductGallery } from "@/components/product-gallery";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { submitProductInquiry } from "@/app/actions";
 import { getBusinessSettings, getProductBySlug, getProductReviews, getProducts } from "@/lib/data";
 import { formatCurrency, whatsappUrl } from "@/lib/utils";
 
@@ -59,16 +63,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
         <Link href="/">Home</Link> / <Link href="/shop">Shop</Link> / {product.name}
       </div>
       <div className="grid gap-10 lg:grid-cols-2">
-        <div className="space-y-4">
-          <div className="relative aspect-square overflow-hidden rounded-lg border bg-secondary">
-            {images[0] ? <Image priority src={images[0]} alt={product.name} fill className="object-cover transition-transform duration-300 hover:scale-110" sizes="(max-width: 1024px) 100vw, 50vw" /> : null}
-          </div>
-          <div className="grid grid-cols-4 gap-3">
-            {images.slice(0, 4).map((image, index) => (
-              <div key={index} className="relative aspect-square overflow-hidden rounded-md border"><Image src={image} alt={`${product.name} view ${index + 1}`} fill className="object-cover" sizes="15vw" /></div>
-            ))}
-          </div>
-        </div>
+        <ProductGallery images={images} name={product.name} />
         <div className="space-y-6">
           <div>
             {product.badge ? <Badge>{product.badge}</Badge> : null}
@@ -100,6 +95,22 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
                   <div key={key} className="grid grid-cols-2 gap-4 border-b pb-2 text-sm"><span className="font-medium">{key}</span><span className="text-muted-foreground">{value}</span></div>
                 ))}
               </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-5">
+              <h2 className="mb-4 font-bold">Product Inquiry</h2>
+              <ActionForm action={submitProductInquiry} buttonLabel="Send Product Inquiry">
+                <input type="hidden" name="productId" value={product.id} />
+                <input type="hidden" name="productName" value={product.name} />
+                <input type="hidden" name="productSlug" value={product.slug} />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Input name="name" placeholder="Full name" required minLength={2} />
+                  <Input name="email" type="email" placeholder="Email" required />
+                </div>
+                <Input name="phone" placeholder="Phone" required minLength={7} />
+                <Textarea name="message" placeholder="Ask about availability, warranty, delivery, or product details" required minLength={10} />
+              </ActionForm>
             </CardContent>
           </Card>
         </div>

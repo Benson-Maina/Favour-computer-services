@@ -12,6 +12,7 @@ export type BusinessSettings = {
   paybill: string;
   account: string;
   siteUrl: string;
+  description: string;
 };
 
 export const business: BusinessSettings = {
@@ -22,7 +23,8 @@ export const business: BusinessSettings = {
   email: "bensonmurage254@gmail.com",
   paybill: "247247",
   account: "FAVOUR-U13",
-  siteUrl: process.env.NEXT_PUBLIC_SITE_URL ?? "https://favourcomputerservices.co.ke"
+  siteUrl: process.env.NEXT_PUBLIC_SITE_URL ?? "https://favourcomputerservices.co.ke",
+  description: "Quality electronics, CCTV systems, repairs, networking, and live streaming services in Nairobi."
 };
 
 function text(value: unknown, fallback = "") {
@@ -48,6 +50,11 @@ function settingString(settings: Map<string, unknown>, key: string, fallback: st
   return text(wrapped.value, fallback);
 }
 
+function nestedSettingString(settings: Map<string, unknown>, groupKey: string, nestedKey: string, fallback: string) {
+  const group = objectValue(settings.get(groupKey));
+  return text(group[nestedKey], fallback);
+}
+
 export async function getBusinessSettings(): Promise<BusinessSettings> {
   const supabase = createAdminClient();
   if (!supabase) return business;
@@ -55,15 +62,18 @@ export async function getBusinessSettings(): Promise<BusinessSettings> {
   const { data } = await supabase.from("site_settings").select("key,value");
   const settings = new Map((data ?? []).map((row) => [text((row as Row).key), (row as Row).value]));
 
+  const legacyBusiness = "business";
+  const legacyPayment = "payment";
   return {
-    name: settingString(settings, "business_name", business.name),
-    location: settingString(settings, "business_location", business.location),
-    phone: settingString(settings, "business_phone", business.phone),
+    name: settingString(settings, "business_name", nestedSettingString(settings, legacyBusiness, "name", business.name)),
+    location: settingString(settings, "business_location", nestedSettingString(settings, legacyBusiness, "location", business.location)),
+    phone: settingString(settings, "business_phone", nestedSettingString(settings, legacyBusiness, "phone", business.phone)),
     whatsapp: settingString(settings, "business_whatsapp", business.whatsapp),
-    email: settingString(settings, "business_email", business.email),
-    paybill: settingString(settings, "paybill_number", business.paybill),
-    account: settingString(settings, "paybill_account", business.account),
-    siteUrl: settingString(settings, "site_url", business.siteUrl)
+    email: settingString(settings, "business_email", nestedSettingString(settings, legacyBusiness, "email", business.email)),
+    paybill: settingString(settings, "paybill_number", nestedSettingString(settings, legacyPayment, "paybill_number", business.paybill)),
+    account: settingString(settings, "paybill_account", nestedSettingString(settings, legacyPayment, "account_number", business.account)),
+    siteUrl: settingString(settings, "site_url", business.siteUrl),
+    description: settingString(settings, "business_description", business.description)
   };
 }
 

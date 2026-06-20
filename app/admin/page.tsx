@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { AdminDashboard } from "@/components/admin-dashboard";
-import { requirePermission } from "@/lib/admin-auth";
+import { requireAdminPage } from "@/lib/admin-auth";
 import { orderStatusLabels, orderStatuses } from "@/lib/admin-analytics";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { AdminActivity, Booking, ChartPoint, InventoryAlert, Order, Payment, PaymentLog, Product } from "@/lib/types";
@@ -175,7 +175,7 @@ async function loadDashboardData() {
 }
 
 export default async function AdminPage() {
-  await requirePermission("dashboard:read");
+  await requireAdminPage("dashboard:read");
   const { products, orders, payments, paymentLogs, bookings, activities, users, orderItems, blogPosts, contactInquiryCount } = await loadDashboardData();
   const completedOrders = orders.filter((order) => ["payment_verified", "completed"].includes(order.status));
   const pendingOrders = orders.filter((order) => ["pending_payment", "payment_submitted"].includes(order.status));

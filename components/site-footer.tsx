@@ -9,7 +9,7 @@ export async function SiteFooter() {
       <div className="container grid gap-8 py-12 md:grid-cols-4">
         <div className="space-y-4">
           <h2 className="text-lg font-bold text-white">{business.name}</h2>
-          <p className="text-sm text-slate-400">Quality electronics, CCTV systems, repairs, networking, and live streaming services in Nairobi.</p>
+          <p className="text-sm text-slate-400">{business.description}</p>
         </div>
         <div>
           <h3 className="mb-3 font-semibold text-white">Shop</h3>
@@ -31,7 +31,7 @@ export async function SiteFooter() {
         </div>
       </div>
       <div className="border-t border-white/10 py-4 text-center text-xs text-slate-400">
-        © 2026 Favour Computer Services. All rights reserved.
+        © 2026 {business.name}. All rights reserved.
       </div>
     </footer>
   );

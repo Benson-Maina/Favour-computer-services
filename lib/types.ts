@@ -102,7 +102,7 @@ export type Order = {
   paymentReference: string;
   paymentScreenshotUrl?: string;
   itemsSnapshot: OrderItem[];
-  status: "pending_payment" | "payment_submitted" | "payment_verified" | "processing" | "ready_for_pickup" | "completed" | "cancelled";
+  status: "pending_payment" | "payment_submitted" | "payment_verified" | "processing" | "ready_for_pickup" | "completed" | "cancelled" | "shipped" | "delivered";
   statusNotes?: string[];
   total: number;
   createdAt: string;

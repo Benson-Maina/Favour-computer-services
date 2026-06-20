@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { AlertTriangle, Boxes, CalendarCheck, CheckCircle2, CreditCard, Newspaper, PackagePlus, ShoppingBag, TrendingUp, Users } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ActionForm } from "@/components/action-form-status";
+import { ProductImageManager } from "@/components/product-image-manager";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -309,8 +310,7 @@ export function AdminDashboard({
               </div>
               <Textarea name="description" defaultValue={productForm.description} placeholder="Description" />
               <Textarea name="specifications" defaultValue={JSON.stringify(productForm.specs, null, 2)} placeholder="Specifications JSON" />
-              <Input name="images" defaultValue={productForm.images.join("\n")} placeholder="Supabase Storage image URLs" />
-              <Input name="productImages" type="file" accept="image/jpeg,image/png,image/webp" multiple />
+              <ProductImageManager images={productForm.images} productName={productForm.name || "Product"} />
               <div className="grid gap-3 sm:grid-cols-3">
                 <Input name="costPrice" type="number" defaultValue={productForm.costPrice} placeholder="Cost" />
                 <Input name="price" type="number" defaultValue={productForm.price} />

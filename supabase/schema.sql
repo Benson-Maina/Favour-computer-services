@@ -344,6 +344,33 @@ create table public.contact_inquiries (
   created_at timestamptz not null default now()
 );
 
+create table public.email_delivery_logs (
+  id uuid primary key default uuid_generate_v4(),
+  event_type text not null,
+  recipient text not null,
+  subject text not null,
+  reference_id text,
+  status text not null check (status in ('sent', 'failed', 'skipped')),
+  provider_message_id text,
+  error_message text,
+  created_at timestamptz not null default now()
+);
+
+create or replace function public.current_user_is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.users
+    where id = auth.uid()
+      and role in ('super_admin', 'admin', 'staff')
+  );
+$$;
+
 alter table public.users enable row level security;
 alter table public.addresses enable row level security;
 alter table public.cart_items enable row level security;
@@ -361,25 +388,69 @@ alter table public.invoices enable row level security;
 alter table public.shipping_records enable row level security;
 alter table public.returns enable row level security;
 alter table public.audit_logs enable row level security;
+alter table public.bookings enable row level security;
+alter table public.contact_inquiries enable row level security;
+alter table public.email_delivery_logs enable row level security;
+alter table public.site_settings enable row level security;
 
 create policy "Users can view own profile" on public.users for select using (auth.uid() = id);
 create policy "Users can update own profile" on public.users for update using (auth.uid() = id);
+create policy "Admins can manage users" on public.users for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
 create policy "Users can manage own addresses" on public.addresses for all using (auth.uid() = user_id);
+create policy "Admins can manage addresses" on public.addresses for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
 create policy "Users can manage own cart" on public.cart_items for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "Users can view own orders" on public.orders for select using (auth.uid() = user_id);
+create policy "Admins can manage orders" on public.orders for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
+create policy "Users can view own order items" on public.order_items for select using (exists (select 1 from public.orders where orders.id = order_items.order_id and orders.user_id = auth.uid()));
+create policy "Admins can manage order items" on public.order_items for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
+create policy "Users can view own payments" on public.payments for select using (exists (select 1 from public.orders where orders.id = payments.order_id and orders.user_id = auth.uid()));
+create policy "Admins can manage payments" on public.payments for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
+create policy "Users can view own order timeline" on public.order_timeline for select using (exists (select 1 from public.orders where orders.id = order_timeline.order_id and orders.user_id = auth.uid()));
+create policy "Admins can manage order timeline" on public.order_timeline for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
+create policy "Users can view own receipts" on public.receipts for select using (exists (select 1 from public.orders where orders.id = receipts.order_id and orders.user_id = auth.uid()));
+create policy "Admins can manage receipts" on public.receipts for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
+create policy "Users can view own invoices" on public.invoices for select using (exists (select 1 from public.orders where orders.id = invoices.order_id and orders.user_id = auth.uid()));
+create policy "Admins can manage invoices" on public.invoices for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
+create policy "Users can view own shipping records" on public.shipping_records for select using (exists (select 1 from public.orders where orders.id = shipping_records.order_id and orders.user_id = auth.uid()));
+create policy "Admins can manage shipping records" on public.shipping_records for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
+create policy "Users can view own returns" on public.returns for select using (exists (select 1 from public.orders where orders.id = returns.order_id and orders.user_id = auth.uid()));
+create policy "Admins can manage returns" on public.returns for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
 create policy "Users can create own reviews" on public.reviews for insert with check (auth.uid() = user_id);
+create policy "Public can view approved reviews" on public.reviews for select using (approved = true);
+create policy "Admins can manage reviews" on public.reviews for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
+create policy "Admins can manage inventory movements" on public.inventory_movements for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
+create policy "Admins can manage order notes" on public.order_notes for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
+create policy "Users can view notified own order notes" on public.order_notes for select using (notify_customer and exists (select 1 from public.orders where orders.id = order_notes.order_id and orders.user_id = auth.uid()));
+create policy "Admins can manage payment logs" on public.payment_logs for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
+create policy "Public can view product images" on public.product_images for select using (true);
+create policy "Admins can manage product images" on public.product_images for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
+create policy "Admins can view audit logs" on public.audit_logs for select using (public.current_user_is_admin());
+create policy "Public can submit bookings" on public.bookings for insert with check (true);
+create policy "Users can view own bookings by email" on public.bookings for select using (auth.jwt() ->> 'email' = email);
+create policy "Admins can manage bookings" on public.bookings for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
+create policy "Public can submit contact inquiries" on public.contact_inquiries for insert with check (true);
+create policy "Admins can manage contact inquiries" on public.contact_inquiries for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
+create policy "Admins can view email logs" on public.email_delivery_logs for select using (public.current_user_is_admin());
+create policy "Public can read site settings" on public.site_settings for select using (true);
+create policy "Admins can manage site settings" on public.site_settings for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values
   ('products', 'products', true, 5242880, array['image/jpeg', 'image/png', 'image/webp']),
   ('payments', 'payments', false, 5242880, array['image/jpeg', 'image/png', 'image/webp', 'application/pdf']),
-  ('testimonials', 'testimonials', true, 5242880, array['image/jpeg', 'image/png', 'image/webp']),
+  ('testimonials', 'testimonials', false, 5242880, array['image/jpeg', 'image/png', 'image/webp']),
   ('blog', 'blog', true, 5242880, array['image/jpeg', 'image/png', 'image/webp']),
   ('services', 'services', true, 5242880, array['image/jpeg', 'image/png', 'image/webp'])
 on conflict (id) do nothing;
 
-create policy "Public can view public product media" on storage.objects for select using (bucket_id in ('products', 'testimonials', 'blog', 'services'));
+update storage.buckets set public = false where id in ('payments', 'testimonials');
+update storage.buckets set public = true where id in ('products', 'blog', 'services');
+
+create policy "Public can view public media" on storage.objects for select using (bucket_id in ('products', 'blog', 'services'));
+create policy "Admins can manage public media" on storage.objects for all using (bucket_id in ('products', 'blog', 'services') and public.current_user_is_admin()) with check (bucket_id in ('products', 'blog', 'services') and public.current_user_is_admin());
 create policy "Authenticated users can upload payment proof" on storage.objects for insert with check (bucket_id = 'payments' and auth.role() = 'authenticated');
+create policy "Users can read own payment proof" on storage.objects for select using (bucket_id = 'payments' and auth.role() = 'authenticated' and owner = auth.uid());
+create policy "Admins can manage private media" on storage.objects for all using (bucket_id in ('payments', 'testimonials') and public.current_user_is_admin()) with check (bucket_id in ('payments', 'testimonials') and public.current_user_is_admin());
 
 create index products_slug_idx on public.products(slug);
 create index products_sku_idx on public.products(sku);
@@ -396,6 +467,7 @@ create index payment_logs_order_idx on public.payment_logs(order_id);
 create index receipts_order_idx on public.receipts(order_id);
 create index invoices_order_idx on public.invoices(order_id);
 create index audit_logs_created_idx on public.audit_logs(created_at);
+create index email_delivery_logs_reference_idx on public.email_delivery_logs(reference_id);
 create index search_logs_term_idx on public.search_logs(term);
 
 create or replace function public.adjust_product_stock(product_id_input uuid, stock_change_input integer)
@@ -476,6 +548,14 @@ declare
   item record;
   current_stock integer;
 begin
+  if exists (
+    select 1 from public.audit_logs
+    where action = 'Inventory Reduced'
+      and entity = order_id_input::text
+  ) then
+    return;
+  end if;
+
   for item in select product_id, quantity from public.order_items where order_id = order_id_input loop
     select stock into current_stock from public.products where id = item.product_id for update;
     if current_stock is null then

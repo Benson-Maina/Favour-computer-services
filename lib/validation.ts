@@ -17,6 +17,16 @@ export const bookingSchema = z.object({
   message: z.string().min(10).max(2000)
 });
 
+export const productInquirySchema = z.object({
+  productId: z.string().min(1),
+  productName: z.string().min(2).max(180),
+  productSlug: z.string().min(2).max(200),
+  name: z.string().min(2).max(120),
+  email: z.string().email(),
+  phone: z.string().min(7).max(30),
+  message: z.string().min(10).max(1000)
+});
+
 export const newsletterSchema = z.object({
   email: z.string().email()
 });
@@ -41,7 +51,7 @@ export const inventoryAdjustmentSchema = z.object({
 
 export const orderStatusSchema = z.object({
   orderId: z.string().min(1),
-  status: z.enum(["pending_payment", "payment_submitted", "payment_verified", "processing", "ready_for_pickup", "completed", "cancelled"]),
+  status: z.enum(["pending_payment", "payment_submitted", "payment_verified", "processing", "ready_for_pickup", "completed", "cancelled", "shipped", "delivered"]),
   note: z.string().max(500).optional(),
   notifyCustomer: z.coerce.boolean().optional()
 });

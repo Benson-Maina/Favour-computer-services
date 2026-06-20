@@ -6,6 +6,8 @@ export const orderStatusLabels: Record<Order["status"], string> = {
   payment_verified: "Payment Verified",
   processing: "Processing",
   ready_for_pickup: "Ready For Pickup",
+  shipped: "Shipped",
+  delivered: "Delivered",
   completed: "Completed",
   cancelled: "Cancelled"
 };

@@ -1,4 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { redirect } from "next/navigation";
 
 export type AdminRole = "super_admin" | "admin" | "staff";
 export type Permission =
@@ -23,15 +25,15 @@ export function hasPermission(role: AdminRole, permission: Permission) {
 }
 
 export async function getCurrentAdminRole(): Promise<AdminRole | null> {
-  if (process.env.NODE_ENV !== "production") return (process.env.ADMIN_BOOTSTRAP_ROLE as AdminRole | undefined) ?? "super_admin";
-
   const supabase = await createClient();
   if (!supabase) return null;
 
   const { data: auth } = await supabase.auth.getUser();
   if (!auth.user) return null;
 
-  const { data: profile } = await supabase.from("users").select("role").eq("id", auth.user.id).single();
+  const adminSupabase = createAdminClient();
+  const client = adminSupabase ?? supabase;
+  const { data: profile } = await client.from("users").select("role").eq("id", auth.user.id).single();
   const role = profile?.role;
   return role === "super_admin" || role === "admin" || role === "staff" ? role : null;
 }
@@ -41,5 +43,11 @@ export async function requirePermission(permission: Permission) {
   if (!role || !hasPermission(role, permission)) {
     throw new Error("You do not have permission to perform this admin action.");
   }
+  return role;
+}
+
+export async function requireAdminPage(permission: Permission) {
+  const role = await getCurrentAdminRole();
+  if (!role || !hasPermission(role, permission)) redirect("/");
   return role;
 }

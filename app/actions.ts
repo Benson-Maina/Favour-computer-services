@@ -2,11 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/admin-auth";
-import { business } from "@/lib/data";
-import { adminEmailHtml, sendTransactionalEmail } from "@/lib/email";
+import { business, getBusinessSettings } from "@/lib/data";
+import { adminEmailHtml, adminNotificationEmail, sendTransactionalEmail } from "@/lib/email";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { bookingSchema, checkoutSchema, contactSchema, inventoryAdjustmentSchema, newsletterSchema, orderStatusSchema, paymentReviewSchema, productAdminSchema, productLifecycleSchema } from "@/lib/validation";
+import { bookingSchema, checkoutSchema, contactSchema, inventoryAdjustmentSchema, newsletterSchema, orderStatusSchema, paymentReviewSchema, productAdminSchema, productInquirySchema, productLifecycleSchema } from "@/lib/validation";
 
 type ActionState = { 
   ok: boolean; 
@@ -20,6 +20,11 @@ type ActionState = {
   notes?: string;
   paymentReference?: string;
 };
+
+function adminUrl(path = "/admin") {
+  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ?? business.siteUrl;
+  return new URL(path, baseUrl).toString();
+}
 
 function getString(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -43,8 +48,25 @@ async function uploadStorageFile(bucket: string, folder: string, file: FormDataE
     return null;
   }
 
+  if (bucket === "payments" || bucket === "testimonials") {
+    const { data, error: signedUrlError } = await supabase.storage.from(bucket).createSignedUrl(path, 60 * 60 * 24 * 14);
+    if (signedUrlError) console.error(`${bucket} signed URL error:`, signedUrlError);
+    return { path, publicUrl: data?.signedUrl ?? path };
+  }
+
   const { data } = supabase.storage.from(bucket).getPublicUrl(path);
   return { path, publicUrl: data.publicUrl };
+}
+
+function parseImageList(value: string) {
+  if (!value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (Array.isArray(parsed)) return parsed.map((item) => String(item).trim()).filter(Boolean);
+  } catch {
+    // Keep compatibility with the previous newline-separated input.
+  }
+  return value.split("\n").map((item) => item.trim()).filter(Boolean);
 }
 
 export async function submitContact(_: ActionState, formData: FormData): Promise<ActionState> {
@@ -74,9 +96,13 @@ export async function submitContact(_: ActionState, formData: FormData): Promise
     }
 
     await sendTransactionalEmail({
-      to: process.env.ADMIN_EMAIL ?? business.email,
+      to: adminNotificationEmail,
       subject: `New contact inquiry: ${parsed.data.subject}`,
-      html: adminEmailHtml("New contact form submission", `${parsed.data.name} (${parsed.data.phone}) wrote: ${parsed.data.message}`)
+      eventType: "contact_form_submission",
+      html: adminEmailHtml("New contact form submission", "A customer submitted the website contact form.", [
+        { title: "Customer Details", rows: [["Name", parsed.data.name], ["Email", parsed.data.email], ["Phone", parsed.data.phone]] },
+        { title: "Request Details", rows: [["Subject", parsed.data.subject], ["Message", parsed.data.message]] }
+      ], adminUrl("/admin"))
     });
     
     return { ok: true, message: `Thank you. Your inquiry has been sent to ${business.email}.` };
@@ -104,11 +130,29 @@ export async function submitBooking(_: ActionState, formData: FormData): Promise
   try {
     const supabase = createAdminClient();
     if (supabase) {
-      const { error } = await supabase.from("bookings").insert({ ...parsed.data, status: "new" });
+      const { error, data: booking } = await supabase.from("bookings").insert({
+        service: parsed.data.service,
+        name: parsed.data.name,
+        email: parsed.data.email,
+        phone: parsed.data.phone,
+        preferred_date: parsed.data.preferredDate || null,
+        message: parsed.data.message,
+        status: "new"
+      }).select("id").single();
       if (error) {
         console.error("Booking save error:", error);
         return { ok: false, message: "We could not save your booking. Please try again." };
       }
+      await sendTransactionalEmail({
+        to: adminNotificationEmail,
+        subject: `New ${parsed.data.service} booking request`,
+        eventType: parsed.data.service.toLowerCase().includes("cctv") ? "cctv_quote_request" : "live_streaming_booking",
+        referenceId: booking?.id,
+        html: adminEmailHtml("New service booking request", "A customer submitted a service booking request.", [
+          { title: "Customer Details", rows: [["Name", parsed.data.name], ["Email", parsed.data.email], ["Phone", parsed.data.phone]] },
+          { title: "Request Details", rows: [["Service", parsed.data.service], ["Preferred Date", parsed.data.preferredDate], ["Message", parsed.data.message], ["Reference", booking?.id]] }
+        ], adminUrl("/admin"))
+      });
     } else {
       console.warn("Supabase admin client unavailable for booking");
     }
@@ -116,7 +160,10 @@ export async function submitBooking(_: ActionState, formData: FormData): Promise
     await sendTransactionalEmail({
       to: parsed.data.email,
       subject: "Booking request received",
-      html: adminEmailHtml("Booking confirmation", `We received your ${parsed.data.service} booking request and will contact you to confirm details.`)
+      eventType: "booking_customer_confirmation",
+      html: adminEmailHtml("Booking request received", `We received your ${parsed.data.service} booking request and will contact you to confirm details.`, [
+        { title: "Your Request", rows: [["Service", parsed.data.service], ["Preferred Date", parsed.data.preferredDate], ["Phone", parsed.data.phone]] }
+      ])
     });
     
     revalidatePath("/admin");
@@ -124,6 +171,37 @@ export async function submitBooking(_: ActionState, formData: FormData): Promise
   } catch (e) {
     console.error("Booking submission error:", e);
     return { ok: false, message: "Something went wrong while submitting your booking. Please try again." };
+  }
+}
+
+export async function submitProductInquiry(_: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = productInquirySchema.safeParse({
+    productId: getString(formData, "productId"),
+    productName: getString(formData, "productName"),
+    productSlug: getString(formData, "productSlug"),
+    name: getString(formData, "name"),
+    email: getString(formData, "email"),
+    phone: getString(formData, "phone"),
+    message: getString(formData, "message")
+  });
+
+  if (!parsed.success) return { ok: false, message: "Please check the product inquiry details." };
+
+  try {
+    await sendTransactionalEmail({
+      to: adminNotificationEmail,
+      subject: `Product inquiry: ${parsed.data.productName}`,
+      eventType: "product_inquiry",
+      referenceId: parsed.data.productId,
+      html: adminEmailHtml("New product inquiry", "A customer asked about a product.", [
+        { title: "Customer Details", rows: [["Name", parsed.data.name], ["Email", parsed.data.email], ["Phone", parsed.data.phone]] },
+        { title: "Product Details", rows: [["Product", parsed.data.productName], ["Product Link", adminUrl(`/products/${parsed.data.productSlug}`)], ["Message", parsed.data.message]] }
+      ], adminUrl("/admin"))
+    });
+    return { ok: true, message: "Product inquiry sent. We will contact you shortly." };
+  } catch (e) {
+    console.error("Product inquiry error:", e);
+    return { ok: false, message: "Could not send the product inquiry. Please try again." };
   }
 }
 
@@ -190,6 +268,7 @@ export async function submitCheckout(_: ActionState, formData: FormData): Promis
 
   try {
     const supabase = createAdminClient();
+    const settings = await getBusinessSettings();
     if (!supabase) {
       console.error("Supabase admin client unavailable");
       return { ok: false, message: "Service unavailable. Please try again." };
@@ -212,7 +291,7 @@ export async function submitCheckout(_: ActionState, formData: FormData): Promis
     }
 
     // Create order record
-    const { error: orderError, data: orderData } = await supabase.from("orders").insert({
+    const { error: orderError } = await supabase.from("orders").insert({
       id: orderId,
       user_id: userData.user?.id,
       customer_name: parsed.data.name,
@@ -231,6 +310,9 @@ export async function submitCheckout(_: ActionState, formData: FormData): Promis
     
     if (orderError) {
       console.error("Order creation error:", orderError);
+      if (orderError.code === "23505") {
+        return { ok: true, message: "Order already submitted.", orderId };
+      }
       return { ok: false, message: "Failed to create order. Please try again." };
     }
 
@@ -251,8 +333,8 @@ export async function submitCheckout(_: ActionState, formData: FormData): Promis
     const { error: paymentError } = await supabase.from("payments").insert({
       order_id: orderId,
       amount: total,
-      paybill_number: business.paybill,
-      account_number: business.account,
+      paybill_number: settings.paybill,
+      account_number: settings.account,
       transaction_code: parsed.data.paymentReference,
       confirmation_url: paymentProof?.publicUrl,
       status: "pending_verification",
@@ -295,9 +377,23 @@ export async function submitCheckout(_: ActionState, formData: FormData): Promis
     // Send confirmation email
     try {
       await sendTransactionalEmail({
+        to: adminNotificationEmail,
+        subject: `New order: ${orderId.slice(0, 8).toUpperCase()}`,
+        eventType: "new_order",
+        referenceId: orderId,
+        html: adminEmailHtml("New order submitted", "A customer submitted an order for payment verification.", [
+          { title: "Customer Details", rows: [["Name", parsed.data.name], ["Email", parsed.data.email], ["Phone", parsed.data.phone]] },
+          { title: "Order Details", rows: [["Order ID", orderId], ["Payment Reference", parsed.data.paymentReference], ["Delivery Method", parsed.data.deliveryMethod], ["Shipping Address", parsed.data.address], ["Total", `KES ${total.toLocaleString("en-KE")}`]] }
+        ], adminUrl("/admin"))
+      });
+      await sendTransactionalEmail({
         to: parsed.data.email,
         subject: "Order placed successfully",
-        html: adminEmailHtml("Order placed successfully", `Your order ${orderId} has been submitted. We will verify Paybill reference ${parsed.data.paymentReference} and update you.`)
+        eventType: "order_customer_confirmation",
+        referenceId: orderId,
+        html: adminEmailHtml("Order placed successfully", `Your order has been submitted. We will verify Paybill reference ${parsed.data.paymentReference} and update you.`, [
+          { title: "Order Details", rows: [["Order ID", orderId], ["Payment Reference", parsed.data.paymentReference], ["Delivery Method", parsed.data.deliveryMethod], ["Total", `KES ${total.toLocaleString("en-KE")}`]] }
+        ])
       });
     } catch (emailError) {
       console.error("Email send error:", emailError);
@@ -395,7 +491,11 @@ export async function updateOrderStatus(_: ActionState, formData: FormData): Pro
   if (!parsed.success) return { ok: false, message: "Choose a valid order status." };
   const supabase = createAdminClient();
   if (supabase) {
-    await supabase.from("orders").update({ status: parsed.data.status }).eq("id", parsed.data.orderId);
+    const { data: orderBefore } = await supabase.from("orders").select("*").eq("id", parsed.data.orderId).single();
+    const updatePayload: Record<string, string> = { status: parsed.data.status };
+    if (parsed.data.status === "ready_for_pickup") updatePayload.pickup_code = orderBefore?.pickup_code ?? `FCS-${parsed.data.orderId.slice(0, 6).toUpperCase()}`;
+    if (parsed.data.status === "delivered" || parsed.data.status === "completed") updatePayload.collection_date = new Date().toISOString();
+    await supabase.from("orders").update(updatePayload).eq("id", parsed.data.orderId);
     await supabase.from("order_timeline").insert({
       order_id: parsed.data.orderId,
       label: `Status changed to ${parsed.data.status}`,
@@ -417,6 +517,18 @@ export async function updateOrderStatus(_: ActionState, formData: FormData): Pro
       details_input: `Status changed to ${parsed.data.status}`,
       user_name_input: "Admin"
     });
+    if (parsed.data.notifyCustomer && orderBefore?.customer_email) {
+      const eventType = parsed.data.status === "ready_for_pickup" ? "store_pickup_ready" : parsed.data.status === "delivered" || parsed.data.status === "completed" ? "order_delivered" : "order_status_update";
+      await sendTransactionalEmail({
+        to: orderBefore.customer_email,
+        subject: parsed.data.status === "ready_for_pickup" ? "Your order is ready for pickup" : parsed.data.status === "delivered" || parsed.data.status === "completed" ? "Your order has been delivered" : "Your order status was updated",
+        eventType,
+        referenceId: parsed.data.orderId,
+        html: adminEmailHtml(parsed.data.status === "ready_for_pickup" ? "Store pickup ready" : parsed.data.status === "delivered" || parsed.data.status === "completed" ? "Order delivered" : "Order status updated", parsed.data.note || "Your order status has been updated.", [
+          { title: "Order Details", rows: [["Order ID", parsed.data.orderId], ["Status", parsed.data.status], ["Pickup Code", updatePayload.pickup_code], ["Customer", orderBefore.customer_name]] }
+        ])
+      });
+    }
   }
   revalidatePath("/admin");
   return { ok: true, message: "Order status updated." };
@@ -436,6 +548,10 @@ export async function reviewPayment(_: ActionState, formData: FormData): Promise
   const supabase = createAdminClient();
   if (supabase) {
     const verified = parsed.data.action === "verify";
+    const { data: paymentBefore } = await supabase.from("payments").select("verified,rejected").eq("id", parsed.data.paymentId).single();
+    if (verified && paymentBefore?.verified) {
+      return { ok: true, message: "Payment was already verified." };
+    }
     await supabase
       .from("payments")
       .update({
@@ -464,6 +580,27 @@ export async function reviewPayment(_: ActionState, formData: FormData): Promise
       order_id: parsed.data.orderId,
       label: verified ? "Payment Approved" : "Payment Rejected",
       actor_name: parsed.data.actor
+    });
+    const { data: order } = await supabase.from("orders").select("customer_name,customer_email,customer_phone,total,payment_reference").eq("id", parsed.data.orderId).single();
+    if (order?.customer_email) {
+      await sendTransactionalEmail({
+        to: order.customer_email,
+        subject: verified ? "Payment approved" : "Payment needs attention",
+        eventType: "payment_approval",
+        referenceId: parsed.data.orderId,
+        html: adminEmailHtml(verified ? "Payment approved" : "Payment rejected", verified ? "Your payment has been approved and your order is now being processed." : (parsed.data.rejectionReason || "Your payment could not be verified. Please contact us for support."), [
+          { title: "Order Details", rows: [["Order ID", parsed.data.orderId], ["Payment Reference", order.payment_reference], ["Total", `KES ${Number(order.total ?? 0).toLocaleString("en-KE")}`]] }
+        ])
+      });
+    }
+    await sendTransactionalEmail({
+      to: adminNotificationEmail,
+      subject: verified ? `Payment approved: ${parsed.data.orderId.slice(0, 8).toUpperCase()}` : `Payment rejected: ${parsed.data.orderId.slice(0, 8).toUpperCase()}`,
+      eventType: "payment_approval",
+      referenceId: parsed.data.orderId,
+      html: adminEmailHtml(verified ? "Payment approved" : "Payment rejected", "A payment review was completed in admin.", [
+        { title: "Review Details", rows: [["Order ID", parsed.data.orderId], ["Payment ID", parsed.data.paymentId], ["Actor", parsed.data.actor], ["Rejection Reason", parsed.data.rejectionReason]] }
+      ], adminUrl("/admin"))
     });
   }
   revalidatePath("/admin");
@@ -510,14 +647,16 @@ export async function saveProduct(_: ActionState, formData: FormData): Promise<A
       supabase.from("categories").upsert({ name: parsed.data.category, slug: categorySlug }, { onConflict: "slug" }).select("id").single(),
       supabase.from("brands").upsert({ name: parsed.data.brand, slug: brandSlug }, { onConflict: "slug" }).select("id").single()
     ]);
-    const imageUrls = parsed.data.images ? parsed.data.images.split("\n").map((item) => item.trim()).filter(Boolean) : [];
+    const imageUrls = parseImageList(parsed.data.images ?? "");
     const uploadedImages = await Promise.all(
       formData
         .getAll("productImages")
         .map((file) => uploadStorageFile("products", parsed.data.slug, file))
     );
     const uploadedUrls = uploadedImages.map((image) => image?.publicUrl).filter((url): url is string => Boolean(url));
-    const images = [...imageUrls, ...uploadedUrls];
+    const featuredImage = getString(formData, "featuredImage");
+    const images = [...imageUrls.filter((url) => url !== featuredImage), ...uploadedUrls];
+    if (featuredImage) images.unshift(featuredImage);
 
     const { data: savedProduct, error: productError } = await supabase.from("products").upsert({
       category_id: category?.id,

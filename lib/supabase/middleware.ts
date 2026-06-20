@@ -11,7 +11,7 @@ export async function updateSession(request: NextRequest) {
     });
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
     if (!url || !key) {
       console.error("Supabase environment variables not configured");
@@ -42,37 +42,26 @@ export async function updateSession(request: NextRequest) {
         return NextResponse.redirect(new URL("/", request.url));
       }
 
-      // Verify user has admin role
-      if (process.env.NODE_ENV !== "production") {
-        // In development, check ADMIN_BOOTSTRAP_ROLE env variable
-        const bootstrapRole = process.env.ADMIN_BOOTSTRAP_ROLE;
-        if (bootstrapRole !== "super_admin" && bootstrapRole !== "admin") {
-          console.warn(`Unauthorized admin access - invalid bootstrap role: ${bootstrapRole}`);
+      try {
+        const { data: profile, error: profileError } = await supabase
+          .from("users")
+          .select("role")
+          .eq("id", user.id)
+          .single();
+
+        if (profileError || !profile) {
+          console.warn("Unauthorized admin access - no user profile found");
           return NextResponse.redirect(new URL("/", request.url));
         }
-      } else {
-        // In production, check user profile role from Supabase
-        try {
-          const { data: profile, error: profileError } = await supabase
-            .from("users")
-            .select("role")
-            .eq("id", user.id)
-            .single();
 
-          if (profileError || !profile) {
-            console.warn("Unauthorized admin access - no user profile found");
-            return NextResponse.redirect(new URL("/", request.url));
-          }
-
-          const validRoles = ["super_admin", "admin"];
-          if (!validRoles.includes(profile.role)) {
-            console.warn(`Unauthorized admin access - invalid role: ${profile.role}`);
-            return NextResponse.redirect(new URL("/", request.url));
-          }
-        } catch (err) {
-          console.error("Error checking admin role:", err);
+        const validRoles = ["super_admin", "admin", "staff"];
+        if (!validRoles.includes(profile.role)) {
+          console.warn(`Unauthorized admin access - invalid role: ${profile.role}`);
           return NextResponse.redirect(new URL("/", request.url));
         }
+      } catch (err) {
+        console.error("Error checking admin role:", err);
+        return NextResponse.redirect(new URL("/", request.url));
       }
     }
 
