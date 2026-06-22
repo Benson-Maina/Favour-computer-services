@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 import { business, getBusinessSettings } from "@/lib/data";
+import { LayoutWrapper } from "@/components/layout-wrapper";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -60,10 +61,9 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           <ThemeProvider>
             <CartProvider>
               <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }} />
-              <SiteHeader />
-              <main>{children}</main>
-              <SiteFooter />
-              <WhatsappFloat />
+              <LayoutWrapper header={<SiteHeader />} footer={<SiteFooter />} whatsapp={<WhatsappFloat />}>
+                {children}
+              </LayoutWrapper>
               <Toaster richColors position="top-right" />
             </CartProvider>
           </ThemeProvider>

@@ -6,12 +6,13 @@ import { requireUser, getCurrentUserId } from "@/lib/auth";
 import { business, getBusinessSettings } from "@/lib/data";
 import { adminEmailHtml, adminNotificationEmail, sendTransactionalEmail } from "@/lib/email";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { addressSchema, bookingSchema, bookingStatusSchema, checkoutSchema, contactInquiryStatusSchema, contactSchema, deleteAddressSchema, inventoryAdjustmentSchema, newsletterSchema, orderStatusSchema, paymentReviewSchema, productAdminSchema, productInquirySchema, productLifecycleSchema, profileSchema, siteSettingsSchema, userRoleSchema, userStatusSchema } from "@/lib/validation";
+import { addressSchema, bookingSchema, bookingStatusSchema, brandAdminSchema, bulkInquiryStatusSchema, bulkProductActionSchema, categoryAdminSchema, checkoutSchema, contactInquiryStatusSchema, contactSchema, deleteAddressSchema, inventoryAdjustmentSchema, newsletterSchema, orderStatusSchema, paymentReviewSchema, productAdminSchema, productInquirySchema, productLifecycleSchema, profileSchema, quickProductUpdateSchema, reviewStatusSchema, siteSettingsSchema, testimonialStatusSchema, userRoleSchema, userStatusSchema } from "@/lib/validation";
 
 type ActionState = { 
   ok: boolean; 
   message: string; 
   orderId?: string;
+  productId?: string;
   customerName?: string;
   customerEmail?: string;
   customerPhone?: string;
@@ -26,6 +27,11 @@ type Row = Record<string, unknown>;
 function adminUrl(path = "/admin") {
   const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ?? business.siteUrl;
   return new URL(path, baseUrl).toString();
+}
+
+function revalidateAdminPaths() {
+  revalidatePath("/admin", "layout");
+  revalidatePath("/shop");
 }
 
 function getString(formData: FormData, key: string) {
@@ -762,6 +768,7 @@ export async function saveProduct(_: ActionState, formData: FormData): Promise<A
 
   if (!parsed.success) return { ok: false, message: "Product details are incomplete." };
   const supabase = createAdminClient();
+  let savedProductId: string | undefined;
   if (supabase) {
     let specs: Record<string, unknown> = {};
     try {
@@ -776,22 +783,24 @@ export async function saveProduct(_: ActionState, formData: FormData): Promise<A
       supabase.from("brands").upsert({ name: parsed.data.brand, slug: brandSlug }, { onConflict: "slug" }).select("id").single()
     ]);
     const imageUrls = parseImageList(parsed.data.images ?? "");
+    const uploadSlug = parsed.data.slug || slugify(parsed.data.name);
     const uploadedImages = await Promise.all(
       formData
         .getAll("productImages")
-        .map((file) => uploadStorageFile("products", parsed.data.slug, file))
+        .map((file) => uploadStorageFile("products", uploadSlug, file))
     );
     const uploadedEntries = uploadedImages
       .filter((image): image is { path: string; publicUrl: string } => Boolean(image?.publicUrl));
     const featuredImage = getString(formData, "featuredImage");
     const images = [...imageUrls.filter((url) => url !== featuredImage), ...uploadedEntries.map((image) => image.publicUrl)];
     if (featuredImage) images.unshift(featuredImage);
+    const productId = getString(formData, "productId");
 
-    const { data: savedProduct, error: productError } = await supabase.from("products").upsert({
+    const productPayload: Row = {
       category_id: category?.id,
       brand_id: brand?.id,
       name: parsed.data.name,
-      slug: parsed.data.slug,
+      slug: parsed.data.slug || slugify(parsed.data.name),
       sku: parsed.data.sku,
       description: parsed.data.description,
       condition: parsed.data.productCondition,
@@ -808,7 +817,10 @@ export async function saveProduct(_: ActionState, formData: FormData): Promise<A
       warranty: parsed.data.warranty,
       supplier_name: parsed.data.supplierName,
       supplier_contact: parsed.data.supplierContact
-    }, { onConflict: "slug" }).select("id").single();
+    };
+    if (productId) productPayload.id = productId;
+
+    const { data: savedProduct, error: productError } = await supabase.from("products").upsert(productPayload, { onConflict: "slug" }).select("id").single();
     if (productError) {
       console.error("Product save error:", productError);
       return { ok: false, message: "Product could not be saved." };
@@ -839,10 +851,10 @@ export async function saveProduct(_: ActionState, formData: FormData): Promise<A
       details_input: `${parsed.data.name} saved with status ${parsed.data.availabilityStatus}`,
       user_name_input: "Admin"
     });
+    savedProductId = savedProduct?.id;
   }
-  revalidatePath("/admin");
-  revalidatePath("/shop");
-  return { ok: true, message: "Product saved." };
+  revalidateAdminPaths();
+  return { ok: true, message: "Product saved.", productId: savedProductId };
 }
 
 export async function updateProductLifecycle(_: ActionState, formData: FormData): Promise<ActionState> {
@@ -1057,4 +1069,187 @@ export async function setUserActiveStatus(_: ActionState, formData: FormData): P
 
   revalidatePath("/admin");
   return { ok: true, message: parsed.data.isActive ? "User reactivated." : "User disabled." };
+}
+
+export async function bulkProductAction(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requirePermission("products:write");
+  const parsed = bulkProductActionSchema.safeParse({
+    productIds: getString(formData, "productIds"),
+    action: getString(formData, "action")
+  });
+  if (!parsed.success) return { ok: false, message: "Invalid bulk product action." };
+  const ids = JSON.parse(parsed.data.productIds) as string[];
+  if (!ids.length) return { ok: false, message: "No products selected." };
+
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable." };
+
+  for (const productId of ids) {
+    if (parsed.data.action === "delete") {
+      const { data: images } = await supabase.from("product_images").select("storage_path,public_url").eq("product_id", productId);
+      await removeStorageObjects("products", (images ?? []).flatMap((image) => [text((image as Row).storage_path), text((image as Row).public_url)]).filter(Boolean));
+      await supabase.from("products").delete().eq("id", productId);
+    } else if (parsed.data.action === "archive") {
+      await supabase.from("products").update({ status: "archived", archived_at: new Date().toISOString() }).eq("id", productId);
+    } else if (parsed.data.action === "activate") {
+      await supabase.from("products").update({ status: "active", archived_at: null }).eq("id", productId);
+    } else if (parsed.data.action === "deactivate") {
+      await supabase.from("products").update({ status: "hidden" }).eq("id", productId);
+    }
+  }
+
+  await supabase.rpc("log_audit", {
+    action_input: "Bulk Product Action",
+    entity_input: `${ids.length} products`,
+    details_input: `Bulk ${parsed.data.action} on ${ids.length} product(s)`,
+    user_name_input: "Admin"
+  });
+  revalidateAdminPaths();
+  return { ok: true, message: `Bulk ${parsed.data.action} completed.` };
+}
+
+export async function quickUpdateProduct(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requirePermission("products:write");
+  const parsed = quickProductUpdateSchema.safeParse({
+    productId: getString(formData, "productId"),
+    field: getString(formData, "field"),
+    value: getString(formData, "value")
+  });
+  if (!parsed.success) return { ok: false, message: "Invalid quick update." };
+
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable." };
+
+  const update: Row = {};
+  if (parsed.data.field === "stock") {
+    const stock = Number(parsed.data.value);
+    if (!Number.isInteger(stock) || stock < 0) return { ok: false, message: "Stock must be a non-negative integer." };
+    update.stock = stock;
+  } else if (parsed.data.field === "price") {
+    const price = Number(parsed.data.value);
+    if (Number.isNaN(price) || price < 0) return { ok: false, message: "Price must be non-negative." };
+    update.price = price;
+  } else if (parsed.data.field === "status") {
+    if (!["active", "draft", "hidden", "archived"].includes(parsed.data.value)) return { ok: false, message: "Invalid status." };
+    update.status = parsed.data.value;
+    if (parsed.data.value === "archived") update.archived_at = new Date().toISOString();
+    if (parsed.data.value === "active") update.archived_at = null;
+  }
+
+  const { error } = await supabase.from("products").update(update).eq("id", parsed.data.productId);
+  if (error) return { ok: false, message: "Product could not be updated." };
+  revalidateAdminPaths();
+  return { ok: true, message: "Product updated." };
+}
+
+export async function saveCategory(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requirePermission("products:write");
+  const parsed = categoryAdminSchema.safeParse({
+    id: getString(formData, "id") || undefined,
+    name: getString(formData, "name")
+  });
+  if (!parsed.success) return { ok: false, message: "Category name is required." };
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable." };
+  const slug = slugify(parsed.data.name);
+  const payload = { name: parsed.data.name, slug };
+  const { error } = parsed.data.id
+    ? await supabase.from("categories").update(payload).eq("id", parsed.data.id)
+    : await supabase.from("categories").upsert(payload, { onConflict: "slug" });
+  if (error) return { ok: false, message: "Category could not be saved." };
+  revalidateAdminPaths();
+  return { ok: true, message: "Category saved." };
+}
+
+export async function deleteCategory(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requirePermission("products:write");
+  const id = getString(formData, "id");
+  if (!id) return { ok: false, message: "Category ID required." };
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable." };
+  const { count } = await supabase.from("products").select("id", { count: "exact", head: true }).eq("category_id", id);
+  if ((count ?? 0) > 0) return { ok: false, message: "Cannot delete a category with products assigned." };
+  const { error } = await supabase.from("categories").delete().eq("id", id);
+  if (error) return { ok: false, message: "Category could not be deleted." };
+  revalidateAdminPaths();
+  return { ok: true, message: "Category deleted." };
+}
+
+export async function saveBrand(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requirePermission("products:write");
+  const parsed = brandAdminSchema.safeParse({
+    id: getString(formData, "id") || undefined,
+    name: getString(formData, "name")
+  });
+  if (!parsed.success) return { ok: false, message: "Brand name is required." };
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable." };
+  const slug = slugify(parsed.data.name);
+  const payload = { name: parsed.data.name, slug };
+  const { error } = parsed.data.id
+    ? await supabase.from("brands").update(payload).eq("id", parsed.data.id)
+    : await supabase.from("brands").upsert(payload, { onConflict: "slug" });
+  if (error) return { ok: false, message: "Brand could not be saved." };
+  revalidateAdminPaths();
+  return { ok: true, message: "Brand saved." };
+}
+
+export async function deleteBrand(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requirePermission("products:write");
+  const id = getString(formData, "id");
+  if (!id) return { ok: false, message: "Brand ID required." };
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable." };
+  const { count } = await supabase.from("products").select("id", { count: "exact", head: true }).eq("brand_id", id);
+  if ((count ?? 0) > 0) return { ok: false, message: "Cannot delete a brand with products assigned." };
+  const { error } = await supabase.from("brands").delete().eq("id", id);
+  if (error) return { ok: false, message: "Brand could not be deleted." };
+  revalidateAdminPaths();
+  return { ok: true, message: "Brand deleted." };
+}
+
+export async function bulkUpdateInquiryStatus(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requirePermission("customers:write");
+  const parsed = bulkInquiryStatusSchema.safeParse({
+    inquiryIds: getString(formData, "inquiryIds"),
+    status: getString(formData, "status")
+  });
+  if (!parsed.success) return { ok: false, message: "Invalid bulk inquiry action." };
+  const ids = JSON.parse(parsed.data.inquiryIds) as string[];
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable." };
+  const { error } = await supabase.from("contact_inquiries").update({ status: parsed.data.status }).in("id", ids);
+  if (error) return { ok: false, message: "Inquiries could not be updated." };
+  revalidateAdminPaths();
+  return { ok: true, message: `${ids.length} inquiry(s) updated.` };
+}
+
+export async function updateReviewStatus(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requirePermission("customers:write");
+  const parsed = reviewStatusSchema.safeParse({
+    reviewId: getString(formData, "reviewId"),
+    approved: getString(formData, "approved") === "true"
+  });
+  if (!parsed.success) return { ok: false, message: "Invalid review update." };
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable." };
+  const { error } = await supabase.from("reviews").update({ approved: parsed.data.approved }).eq("id", parsed.data.reviewId);
+  if (error) return { ok: false, message: "Review could not be updated." };
+  revalidateAdminPaths();
+  return { ok: true, message: parsed.data.approved ? "Review approved." : "Review unapproved." };
+}
+
+export async function updateTestimonialStatus(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requirePermission("testimonials:write");
+  const parsed = testimonialStatusSchema.safeParse({
+    testimonialId: getString(formData, "testimonialId"),
+    approved: getString(formData, "approved") === "true"
+  });
+  if (!parsed.success) return { ok: false, message: "Invalid testimonial update." };
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable." };
+  const { error } = await supabase.from("testimonials").update({ approved: parsed.data.approved }).eq("id", parsed.data.testimonialId);
+  if (error) return { ok: false, message: "Testimonial could not be updated." };
+  revalidateAdminPaths();
+  return { ok: true, message: parsed.data.approved ? "Testimonial approved." : "Testimonial unapproved." };
 }

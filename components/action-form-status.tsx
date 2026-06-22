@@ -34,7 +34,7 @@ export function ActionForm({
         {buttonLabel}
       </Button>
       {state.message ? (
-        <p className={state.ok ? "text-sm text-emerald-600" : "text-sm text-destructive"}>{state.message}</p>
+        <p className={state.ok ? "text-sm text-primary" : "text-sm text-destructive"}>{state.message}</p>
       ) : null}
     </form>
   );

@@ -72,4 +72,9 @@
   .glass {
     @apply border border-white/20 bg-white/70 shadow-premium backdrop-blur-xl dark:bg-slate-950/60;
   }
+
+  .admin-shell select,
+  .admin-shell option {
+    @apply bg-background text-foreground;
+  }
 }

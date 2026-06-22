@@ -142,3 +142,39 @@ export const userStatusSchema = z.object({
   userId: z.string().min(1),
   isActive: z.coerce.boolean()
 });
+
+export const categoryAdminSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().min(2).max(120)
+});
+
+export const brandAdminSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().min(2).max(120)
+});
+
+export const bulkProductActionSchema = z.object({
+  productIds: z.string().min(2),
+  action: z.enum(["delete", "archive", "activate", "deactivate"])
+});
+
+export const quickProductUpdateSchema = z.object({
+  productId: z.string().min(1),
+  field: z.enum(["stock", "price", "status"]),
+  value: z.string().min(1)
+});
+
+export const bulkInquiryStatusSchema = z.object({
+  inquiryIds: z.string().min(2),
+  status: z.enum(["new", "read", "replied", "closed"])
+});
+
+export const reviewStatusSchema = z.object({
+  reviewId: z.string().min(1),
+  approved: z.coerce.boolean()
+});
+
+export const testimonialStatusSchema = z.object({
+  testimonialId: z.string().min(1),
+  approved: z.coerce.boolean()
+});
