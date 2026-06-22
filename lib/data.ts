@@ -43,6 +43,14 @@ function objectValue(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Row) : {};
 }
 
+function logQueryError(label: string, error: { message?: string; code?: string; details?: string | null; hint?: string | null }) {
+  console.error(`${label}:`, error.message || error.code || "Unknown database error", {
+    code: error.code,
+    details: error.details,
+    hint: error.hint
+  });
+}
+
 function settingString(settings: Map<string, unknown>, key: string, fallback: string) {
   const direct = settings.get(key);
   if (typeof direct === "string") return direct;
@@ -132,7 +140,7 @@ export async function getProducts(options: { includeInactive?: boolean; limit?: 
 
   const { data, error } = await query;
   if (error) {
-    console.error("Product query failed:", error);
+    logQueryError("Product query failed", error);
     return [];
   }
   return (data ?? []).map((row) => mapProduct(row as Row));
@@ -172,7 +180,7 @@ export async function getCategories(): Promise<Category[]> {
 
   const { data, error } = await supabase.from("categories").select("*, children:categories(name)").is("parent_id", null).order("name");
   if (error) {
-    console.error("Category query failed:", error);
+    logQueryError("Category query failed", error);
     return [];
   }
 
