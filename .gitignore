@@ -5,3 +5,4 @@ out
 dist
 *.log
 screenshots
+package-lock.json

@@ -192,14 +192,14 @@ export async function submitContact(_: ActionState, formData: FormData): Promise
 
   try {
     const supabase = createAdminClient();
-    if (supabase) {
-      const { error } = await supabase.from("contact_inquiries").insert(parsed.data);
-      if (error) {
-        console.error("Contact inquiry save error:", error);
-        return { ok: false, message: "We could not save your inquiry. Please try again or contact us on WhatsApp." };
-      }
-    } else {
-      console.warn("Supabase admin client unavailable for contact inquiry");
+    if (!supabase) {
+      return { ok: false, message: "Service unavailable. Please try again or contact us on WhatsApp." };
+    }
+
+    const { error } = await supabase.from("contact_inquiries").insert(parsed.data);
+    if (error) {
+      console.error("Contact inquiry save error:", error);
+      return { ok: false, message: "We could not save your inquiry. Please try again or contact us on WhatsApp." };
     }
 
     await sendTransactionalEmail({
