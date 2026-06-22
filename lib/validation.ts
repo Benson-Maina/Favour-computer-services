@@ -132,3 +132,13 @@ export const siteSettingsSchema = z.object({
   siteUrl: z.string().url(),
   businessDescription: z.string().min(10).max(500)
 });
+
+export const userRoleSchema = z.object({
+  userId: z.string().min(1),
+  role: z.enum(["customer", "staff", "admin", "super_admin"])
+});
+
+export const userStatusSchema = z.object({
+  userId: z.string().min(1),
+  isActive: z.coerce.boolean()
+});

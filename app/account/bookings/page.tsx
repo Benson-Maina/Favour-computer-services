@@ -19,11 +19,15 @@ function text(value: unknown, fallback = "") {
 }
 
 export default async function BookingsPage() {
-  const { user } = await requireUser();
+  const { user, userId } = await requireUser();
   const email = getUserEmail(user);
   const supabase = createAdminClient();
   const { data } = supabase
-    ? await supabase.from("bookings").select("*").eq("email", email).order("created_at", { ascending: false })
+    ? await supabase
+        .from("bookings")
+        .select("*")
+        .or(`user_id.eq.${userId},and(user_id.is.null,email.eq.${email})`)
+        .order("created_at", { ascending: false })
     : { data: [] };
   const bookings = data ?? [];
 

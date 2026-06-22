@@ -1,12 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requirePermission } from "@/lib/admin-auth";
+import { canAssignRole, canManageUser, getCurrentAppUser, requirePermission, requireSuperAdmin } from "@/lib/admin-auth";
 import { requireUser, getCurrentUserId } from "@/lib/auth";
 import { business, getBusinessSettings } from "@/lib/data";
 import { adminEmailHtml, adminNotificationEmail, sendTransactionalEmail } from "@/lib/email";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { addressSchema, bookingSchema, bookingStatusSchema, checkoutSchema, contactInquiryStatusSchema, contactSchema, deleteAddressSchema, inventoryAdjustmentSchema, newsletterSchema, orderStatusSchema, paymentReviewSchema, productAdminSchema, productInquirySchema, productLifecycleSchema, profileSchema, siteSettingsSchema } from "@/lib/validation";
+import { addressSchema, bookingSchema, bookingStatusSchema, checkoutSchema, contactInquiryStatusSchema, contactSchema, deleteAddressSchema, inventoryAdjustmentSchema, newsletterSchema, orderStatusSchema, paymentReviewSchema, productAdminSchema, productInquirySchema, productLifecycleSchema, profileSchema, siteSettingsSchema, userRoleSchema, userStatusSchema } from "@/lib/validation";
 
 type ActionState = { 
   ok: boolean; 
@@ -41,19 +41,37 @@ function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
 
-async function ensureUserProfile(userId: string, fullName: string, phone?: string) {
+async function ensureUserProfile(userId: string, fullName: string, phone?: string, email?: string) {
   const supabase = createAdminClient();
   if (!supabase) return;
   const { data: existing } = await supabase.from("users").select("role").eq("id", userId).maybeSingle();
   if (existing) {
-    await supabase.from("users").update({ full_name: fullName, phone: phone || null }).eq("id", userId);
+    await supabase.from("users").update({
+      full_name: fullName,
+      phone: phone || null,
+      email: email || null
+    }).eq("id", userId);
     return;
   }
   await supabase.from("users").insert({
     id: userId,
     full_name: fullName,
     phone: phone || null,
+    email: email || null,
     role: "customer"
+  });
+}
+
+async function auditAdminAction(action: string, entity: string, details: string) {
+  const supabase = createAdminClient();
+  if (!supabase) return;
+  const actor = await getCurrentAppUser();
+  await supabase.from("audit_logs").insert({
+    user_id: actor?.id ?? null,
+    user_name: actor?.full_name ?? "Admin",
+    action,
+    entity,
+    details
   });
 }
 
@@ -108,11 +126,12 @@ export async function saveProfile(_: ActionState, formData: FormData): Promise<A
   const supabase = createAdminClient();
   if (!supabase) return { ok: false, message: "Service unavailable. Please try again." };
 
-  const { data: existing } = await supabase.from("users").select("role").eq("id", userId).maybeSingle();
+  const { data: existing } = await supabase.from("users").select("role,email").eq("id", userId).maybeSingle();
   const { error } = await supabase.from("users").upsert({
     id: userId,
     full_name: parsed.data.fullName,
     phone: parsed.data.phone || null,
+    email: existing?.email ?? null,
     role: existing?.role ?? "customer"
   }, { onConflict: "id" });
   if (error) return { ok: false, message: "Profile could not be saved." };
@@ -236,6 +255,7 @@ export async function submitBooking(_: ActionState, formData: FormData): Promise
 
   try {
     const supabase = createAdminClient();
+    const bookingUserId = await getCurrentUserId();
     if (supabase) {
       const { error, data: booking } = await supabase.from("bookings").insert({
         service: parsed.data.service,
@@ -244,6 +264,7 @@ export async function submitBooking(_: ActionState, formData: FormData): Promise
         phone: parsed.data.phone,
         preferred_date: parsed.data.preferredDate || null,
         message: parsed.data.message,
+        user_id: bookingUserId,
         status: "new"
       }).select("id").single();
       if (error) {
@@ -385,7 +406,7 @@ export async function submitCheckout(_: ActionState, formData: FormData): Promis
     const paymentProof = await uploadStorageFile("payments", `orders/${orderId}`, formData.get("paymentScreenshot"));
 
     if (userId && parsed.data.address) {
-      await ensureUserProfile(userId, parsed.data.name, parsed.data.phone);
+      await ensureUserProfile(userId, parsed.data.name, parsed.data.phone, parsed.data.email);
       await supabase.from("addresses").insert({
         user_id: userId,
         label: parsed.data.deliveryMethod,
@@ -861,7 +882,7 @@ export async function updateProductLifecycle(_: ActionState, formData: FormData)
 }
 
 export async function updateBookingStatus(_: ActionState, formData: FormData): Promise<ActionState> {
-  await requirePermission("orders:write");
+  await requirePermission("bookings:write");
   const parsed = bookingStatusSchema.safeParse({
     bookingId: getString(formData, "bookingId"),
     status: getString(formData, "status")
@@ -882,7 +903,7 @@ export async function updateBookingStatus(_: ActionState, formData: FormData): P
 }
 
 export async function updateContactInquiryStatus(_: ActionState, formData: FormData): Promise<ActionState> {
-  await requirePermission("customers:read");
+  await requirePermission("customers:write");
   const parsed = contactInquiryStatusSchema.safeParse({
     inquiryId: getString(formData, "inquiryId"),
     status: getString(formData, "status")
@@ -903,7 +924,7 @@ export async function updateContactInquiryStatus(_: ActionState, formData: FormD
 }
 
 export async function saveSiteSettings(_: ActionState, formData: FormData): Promise<ActionState> {
-  await requirePermission("dashboard:read");
+  await requirePermission("settings:write");
   const parsed = siteSettingsSchema.safeParse({
     businessName: getString(formData, "businessName"),
     businessLocation: getString(formData, "businessLocation"),
@@ -940,4 +961,100 @@ export async function saveSiteSettings(_: ActionState, formData: FormData): Prom
   revalidatePath("/");
   revalidatePath("/admin");
   return { ok: true, message: "Site settings saved." };
+}
+
+export async function updateUserRole(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requireSuperAdmin();
+  const parsed = userRoleSchema.safeParse({
+    userId: getString(formData, "userId"),
+    role: getString(formData, "role")
+  });
+  if (!parsed.success) return { ok: false, message: "Invalid role assignment." };
+
+  const actor = await getCurrentAppUser();
+  if (!actor) return { ok: false, message: "Unauthorized." };
+  if (parsed.data.userId === actor.id) {
+    return { ok: false, message: "You cannot change your own role." };
+  }
+
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable." };
+
+  const { data: target } = await supabase
+    .from("users")
+    .select("id, role, full_name, email")
+    .eq("id", parsed.data.userId)
+    .maybeSingle();
+
+  if (!target) return { ok: false, message: "User not found." };
+  if (!canManageUser(actor.role as "super_admin", target.role)) {
+    return { ok: false, message: "You cannot modify this user." };
+  }
+  if (!canAssignRole(actor.role as "super_admin", target.role, parsed.data.role)) {
+    return { ok: false, message: "You cannot assign this role." };
+  }
+
+  const { error } = await supabase
+    .from("users")
+    .update({ role: parsed.data.role })
+    .eq("id", parsed.data.userId);
+
+  if (error) return { ok: false, message: "Role could not be updated." };
+
+  await auditAdminAction(
+    "Role Changed",
+    parsed.data.userId,
+    `${target.full_name} (${target.email ?? "no email"}): ${target.role} → ${parsed.data.role}`
+  );
+
+  revalidatePath("/admin");
+  return { ok: true, message: "User role updated." };
+}
+
+export async function setUserActiveStatus(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requireSuperAdmin();
+  const parsed = userStatusSchema.safeParse({
+    userId: getString(formData, "userId"),
+    isActive: getString(formData, "isActive") === "true"
+  });
+  if (!parsed.success) return { ok: false, message: "Invalid user status." };
+
+  const actor = await getCurrentAppUser();
+  if (!actor) return { ok: false, message: "Unauthorized." };
+  if (parsed.data.userId === actor.id) {
+    return { ok: false, message: "You cannot disable your own account." };
+  }
+
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable." };
+
+  const { data: target } = await supabase
+    .from("users")
+    .select("id, role, full_name, email, is_active")
+    .eq("id", parsed.data.userId)
+    .maybeSingle();
+
+  if (!target) return { ok: false, message: "User not found." };
+  if (!canManageUser(actor.role as "super_admin", target.role)) {
+    return { ok: false, message: "You cannot modify this user." };
+  }
+
+  const { error } = await supabase
+    .from("users")
+    .update({
+      is_active: parsed.data.isActive,
+      deleted_at: parsed.data.isActive ? null : new Date().toISOString()
+    })
+    .eq("id", parsed.data.userId);
+
+  if (error) return { ok: false, message: "User status could not be updated." };
+
+  await auditAdminAction(
+    parsed.data.isActive ? "User Reactivated" : "User Disabled",
+    parsed.data.userId,
+    `${target.full_name} (${target.email ?? "no email"}) ${parsed.data.isActive ? "reactivated" : "disabled"}`
+  );
+
+  revalidatePath("/admin");
+  return { ok: true, message: parsed.data.isActive ? "User reactivated." : "User disabled." };
 }

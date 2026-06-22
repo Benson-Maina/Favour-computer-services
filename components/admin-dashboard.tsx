@@ -5,6 +5,7 @@ import { AlertTriangle, Boxes, CalendarCheck, CheckCircle2, CreditCard, Newspape
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { adjustInventory, reviewPayment, saveProduct, saveSiteSettings, updateBookingStatus, updateContactInquiryStatus, updateOrderStatus, updateProductLifecycle } from "@/app/actions";
 import { ActionForm } from "@/components/action-form-status";
+import { AdminUserManagement, type AdminUserRecord } from "@/components/admin-user-management";
 import { ProductImageManager } from "@/components/product-image-manager";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,8 +14,13 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { orderStatusLabels, orderStatuses } from "@/lib/admin-analytics";
 import type { BusinessSettings } from "@/lib/data";
+import type { AdminRole, Permission } from "@/lib/admin-permissions";
 import type { AdminActivity, Booking, ChartPoint, InventoryAlert, Order, Payment, PaymentLog, Product } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
+
+function canAccess(permissions: Permission[], permission: Permission) {
+  return permissions.includes(permission);
+}
 
 type ContactInquiry = {
   id: string;
@@ -56,6 +62,10 @@ type DashboardProps = {
   blogPosts: { id: string; title: string; published: boolean; draft: boolean; scheduledAt: string; category: string }[];
   contactInquiries: ContactInquiry[];
   business: BusinessSettings;
+  permissions: Permission[];
+  adminRole: AdminRole;
+  adminUsers: AdminUserRecord[];
+  currentUserId: string;
 };
 
 const widgetIcons = [TrendingUp, ShoppingBag, AlertTriangle, Boxes, CheckCircle2, AlertTriangle, Boxes, AlertTriangle, AlertTriangle, Users];
@@ -76,7 +86,11 @@ export function AdminDashboard(props: DashboardProps) {
     activities,
     blogPosts,
     contactInquiries,
-    business
+    business,
+    permissions,
+    adminRole,
+    adminUsers,
+    currentUserId
   } = props;
 
   const [selectedProductId, setSelectedProductId] = useState(products[0]?.id ?? "");
@@ -125,6 +139,7 @@ export function AdminDashboard(props: DashboardProps) {
           <p className="text-sm font-bold uppercase text-primary">Admin Dashboard</p>
           <h1 className="text-4xl font-black tracking-tight">Business Control Center</h1>
           <p className="mt-2 max-w-2xl text-muted-foreground">Monitor revenue, orders, stock, bookings, Paybill verification, publishing, and product operations from one workspace.</p>
+          <p className="mt-1 text-xs uppercase tracking-wide text-muted-foreground">Signed in as {adminRole.replace("_", " ")}</p>
         </div>
       </div>
 
@@ -151,6 +166,7 @@ export function AdminDashboard(props: DashboardProps) {
       </div>
 
       <div className="mt-6 grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+        {canAccess(permissions, "orders:read") ? (
         <Card>
           <CardContent className="p-5">
             <div className="mb-4 flex items-center justify-between">
@@ -180,7 +196,9 @@ export function AdminDashboard(props: DashboardProps) {
             </div>
           </CardContent>
         </Card>
+        ) : null}
 
+        {canAccess(permissions, "audit:read") ? (
         <Card>
           <CardContent className="p-5">
             <h2 className="mb-4 text-xl font-bold">Recent Activity</h2>
@@ -195,9 +213,12 @@ export function AdminDashboard(props: DashboardProps) {
             </div>
           </CardContent>
         </Card>
+        ) : null}
       </div>
 
       <div className="mt-6 grid gap-5 xl:grid-cols-3">
+        {canAccess(permissions, "inventory:read") ? (
+        <>
         <Card className="xl:col-span-2">
           <CardContent className="p-5">
             <div className="mb-4 flex items-center justify-between">
@@ -214,11 +235,13 @@ export function AdminDashboard(props: DashboardProps) {
                     </div>
                     <Badge variant={product.stock <= product.lowStockThreshold ? "default" : "outline"}>{product.stock} in stock</Badge>
                   </div>
+                  {canAccess(permissions, "inventory:write") ? (
                   <ActionForm action={adjustInventory} buttonLabel="Record Stock Change" className="mt-4 grid gap-3 sm:grid-cols-[90px_1fr]">
                     <input type="hidden" name="productId" value={product.id} />
                     <Input name="change" type="number" placeholder="+5 / -2" />
                     <Input name="reason" placeholder="Reason" />
                   </ActionForm>
+                  ) : null}
                 </div>
               )) : <EmptyState title="No products added yet." />}
             </div>
@@ -239,8 +262,11 @@ export function AdminDashboard(props: DashboardProps) {
             </div>
           </CardContent>
         </Card>
+        </>
+        ) : null}
       </div>
 
+      {canAccess(permissions, "payments:read") ? (
       <div className="mt-6 grid gap-5 xl:grid-cols-2">
         <Card>
           <CardContent className="p-5">
@@ -258,6 +284,7 @@ export function AdminDashboard(props: DashboardProps) {
                     </div>
                     {payment.confirmationUrl ? <Button asChild variant="outline" size="sm"><a href={payment.confirmationUrl} target="_blank">View Screenshot</a></Button> : null}
                   </div>
+                  {canAccess(permissions, "payments:write") ? (
                   <ActionForm action={reviewPayment} buttonLabel="Submit Review" className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
                     <input type="hidden" name="paymentId" value={payment.id} />
                     <input type="hidden" name="orderId" value={payment.orderId} />
@@ -268,6 +295,9 @@ export function AdminDashboard(props: DashboardProps) {
                     <Input name="rejectionReason" placeholder="Rejection reason" />
                     <input type="hidden" name="actor" value="Admin" />
                   </ActionForm>
+                  ) : (
+                    <p className="mt-3 text-sm text-muted-foreground">Payment approval requires admin access.</p>
+                  )}
                 </div>
               )) : <EmptyState title="No payments awaiting review." />}
             </div>
@@ -289,8 +319,10 @@ export function AdminDashboard(props: DashboardProps) {
           </CardContent>
         </Card>
       </div>
+      ) : null}
 
-      <div className="mt-6 grid gap-5 xl:grid-cols-[1fr_1fr_1fr]">
+      <div className="mt-6 grid gap-5 xl:grid-cols-3">
+        {canAccess(permissions, "products:write") ? (
         <Card>
           <CardContent className="p-5">
             <div className="mb-4 flex items-center gap-2">
@@ -362,7 +394,9 @@ export function AdminDashboard(props: DashboardProps) {
             ) : null}
           </CardContent>
         </Card>
+        ) : null}
 
+        {canAccess(permissions, "bookings:read") ? (
         <Card>
           <CardContent className="p-5">
             <div className="mb-4 flex items-center gap-2">
@@ -378,18 +412,22 @@ export function AdminDashboard(props: DashboardProps) {
                   </div>
                   <p className="text-sm text-muted-foreground">{booking.name} | {booking.phone}</p>
                   <p className="mt-2 text-sm">{booking.message}</p>
+                  {canAccess(permissions, "bookings:write") ? (
                   <ActionForm action={updateBookingStatus} buttonLabel="Update Booking" className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
                     <input type="hidden" name="bookingId" value={booking.id} />
                     <select name="status" defaultValue={booking.status} className="h-10 rounded-md border bg-background px-3 text-sm">
                       {(["new", "contacted", "scheduled", "completed", "cancelled"] as const).map((status) => <option key={status} value={status}>{status}</option>)}
                     </select>
                   </ActionForm>
+                  ) : null}
                 </div>
               )) : <EmptyState title="No bookings yet." />}
             </div>
           </CardContent>
         </Card>
+        ) : null}
 
+        {canAccess(permissions, "blog:read") ? (
         <Card>
           <CardContent className="p-5">
             <div className="mb-4 flex items-center gap-2">
@@ -406,9 +444,11 @@ export function AdminDashboard(props: DashboardProps) {
             </div>
           </CardContent>
         </Card>
+        ) : null}
       </div>
 
       <div className="mt-6 grid gap-5 xl:grid-cols-[1fr_1fr]">
+        {canAccess(permissions, "customers:read") ? (
         <Card>
           <CardContent className="p-5">
             <h2 className="mb-4 text-xl font-bold">Contact Inquiries</h2>
@@ -423,18 +463,22 @@ export function AdminDashboard(props: DashboardProps) {
                     <Badge variant="outline">{inquiry.status}</Badge>
                   </div>
                   <p className="mt-2 text-sm">{inquiry.message}</p>
+                  {canAccess(permissions, "customers:write") ? (
                   <ActionForm action={updateContactInquiryStatus} buttonLabel="Update Inquiry" className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
                     <input type="hidden" name="inquiryId" value={inquiry.id} />
                     <select name="status" defaultValue={inquiry.status} className="h-10 rounded-md border bg-background px-3 text-sm">
                       {(["new", "read", "replied", "closed"] as const).map((status) => <option key={status} value={status}>{status}</option>)}
                     </select>
                   </ActionForm>
+                  ) : null}
                 </div>
               )) : <EmptyState title="No contact inquiries yet." />}
             </div>
           </CardContent>
         </Card>
+        ) : null}
 
+        {canAccess(permissions, "settings:write") ? (
         <Card>
           <CardContent className="p-5">
             <h2 className="mb-4 text-xl font-bold">Site Settings</h2>
@@ -455,7 +499,14 @@ export function AdminDashboard(props: DashboardProps) {
             </ActionForm>
           </CardContent>
         </Card>
+        ) : null}
       </div>
+
+      {canAccess(permissions, "users:read") ? (
+        <div className="mt-6">
+          <AdminUserManagement users={adminUsers} currentUserId={currentUserId} />
+        </div>
+      ) : null}
     </section>
   );
 }

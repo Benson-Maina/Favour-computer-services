@@ -13,10 +13,14 @@ create type shipping_status as enum ('not_required', 'pending', 'shipped', 'deli
 
 create table public.users (
   id text primary key,
+  email text,
   full_name text not null,
   phone text,
   role user_role not null default 'customer',
-  created_at timestamptz not null default now()
+  is_active boolean not null default true,
+  deleted_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 create table public.categories (
@@ -111,7 +115,7 @@ create table public.addresses (
 
 create table public.cart_items (
   id uuid primary key default uuid_generate_v4(),
-  user_id uuid not null references public.users(id) on delete cascade,
+  user_id text not null references public.users(id) on delete cascade,
   product_id text not null,
   quantity integer not null default 1 check (quantity > 0),
   payload jsonb not null default '{}',
@@ -250,6 +254,7 @@ create table public.audit_logs (
 
 create table public.bookings (
   id uuid primary key default uuid_generate_v4(),
+  user_id text references public.users(id),
   service text not null,
   name text not null,
   email text not null,
@@ -453,6 +458,10 @@ create policy "Authenticated users can upload payment proof" on storage.objects 
 create policy "Users can read own payment proof" on storage.objects for select using (bucket_id = 'payments' and auth.role() = 'authenticated' and owner = auth.uid());
 create policy "Admins can manage private media" on storage.objects for all using (bucket_id in ('payments', 'testimonials') and public.current_user_is_admin()) with check (bucket_id in ('payments', 'testimonials') and public.current_user_is_admin());
 
+create index users_email_active_idx on public.users (lower(email)) where email is not null and deleted_at is null;
+create index users_role_idx on public.users(role);
+create index users_is_active_idx on public.users(is_active) where is_active = true;
+create index bookings_user_id_idx on public.bookings(user_id);
 create index products_slug_idx on public.products(slug);
 create index products_sku_idx on public.products(sku);
 create index products_status_idx on public.products(status);

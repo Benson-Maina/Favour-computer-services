@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { AdminDashboard } from "@/components/admin-dashboard";
-import { requireAdminPage } from "@/lib/admin-auth";
+import type { AdminUserRecord } from "@/components/admin-user-management";
+import { getAdminPermissions, getCurrentAdminRole, requireAdminPage } from "@/lib/admin-auth";
+import { getCurrentUserId } from "@/lib/auth";
 import { orderStatusLabels, orderStatuses } from "@/lib/admin-analytics";
 import { getBusinessSettings } from "@/lib/data";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -124,7 +126,7 @@ async function loadDashboardData() {
     supabase.from("payment_logs").select("*").order("created_at", { ascending: false }),
     supabase.from("bookings").select("*").order("created_at", { ascending: false }),
     supabase.from("audit_logs").select("*").order("created_at", { ascending: false }).limit(10),
-    supabase.from("users").select("id,created_at").order("created_at", { ascending: true }),
+    supabase.from("users").select("id,email,full_name,phone,role,is_active,created_at").order("created_at", { ascending: false }),
     supabase.from("order_items").select("quantity, products(name)").limit(1000),
     supabase.from("blog_posts").select("id,title,published,draft,scheduled_at,blog_categories(name)").order("created_at", { ascending: false }).limit(6),
     supabase.from("contact_inquiries").select("*").order("created_at", { ascending: false }).limit(20)
@@ -186,6 +188,13 @@ async function loadDashboardData() {
 
 export default async function AdminPage() {
   await requireAdminPage("dashboard:read");
+  const [adminRole, permissions, currentUserId] = await Promise.all([
+    getCurrentAdminRole(),
+    getAdminPermissions(),
+    getCurrentUserId()
+  ]);
+  if (!adminRole || !currentUserId) return null;
+
   const [{ products, orders, payments, paymentLogs, bookings, activities, users, orderItems, blogPosts, contactInquiries }, business] = await Promise.all([
     loadDashboardData(),
     getBusinessSettings()
@@ -194,9 +203,21 @@ export default async function AdminPage() {
   const pendingOrders = orders.filter((order) => ["pending_payment", "payment_submitted"].includes(order.status));
   const revenueChart = chartFromOrders(completedOrders);
   const ordersChart = orderStatuses.map((status) => ({ name: orderStatusLabels[status], orders: orders.filter((order) => order.status === status).length }));
-  const customerGrowthChart = (users as Row[]).map((user, index) => ({
+  const customerGrowthChart = (users as Row[])
+    .filter((user) => text(user.role, "customer") === "customer")
+    .reverse()
+    .map((user, index) => ({
     name: new Date(text(user.created_at, new Date().toISOString())).toLocaleDateString("en-KE", { month: "short", day: "numeric" }),
     customers: index + 1
+  }));
+  const adminUsers: AdminUserRecord[] = (users as Row[]).map((user) => ({
+    id: text(user.id),
+    email: text(user.email) || null,
+    fullName: text(user.full_name, "Customer"),
+    phone: text(user.phone) || null,
+    role: text(user.role, "customer") as AdminUserRecord["role"],
+    isActive: user.is_active !== false,
+    createdAt: text(user.created_at, new Date().toISOString())
   }));
   const productUnits = new Map<string, number>();
   orderItems.forEach((row) => {
@@ -229,7 +250,7 @@ export default async function AdminPage() {
         deliveredOrders: orders.filter((order) => order.status === "completed").length,
         cancelledOrders: orders.filter((order) => order.status === "cancelled").length,
         completedOrders: completedOrders.length,
-        totalCustomers: (users as Row[]).length,
+        totalCustomers: (users as Row[]).filter((user) => text(user.role, "customer") === "customer").length,
         totalProducts: products.length,
         submittedPayments: payments.filter((payment) => !payment.verified && !payment.rejected).length,
         lowStockProducts: products.filter((product) => product.stock > 0 && product.stock <= product.lowStockThreshold).length,
@@ -256,6 +277,10 @@ export default async function AdminPage() {
       }))}
       contactInquiries={contactInquiries}
       business={business}
+      permissions={permissions}
+      adminRole={adminRole}
+      adminUsers={adminUsers}
+      currentUserId={currentUserId}
     />
   );
 }
