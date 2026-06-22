@@ -1,13 +1,21 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { OrderDetailPanel } from "@/components/admin/order-detail-panel";
 import { AdminPageHeader } from "@/components/admin/admin-page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { orderStatusLabels } from "@/lib/admin-analytics";
-import { requireAdminPage } from "@/lib/admin-auth";
-import { getOrderPaymentStatus, loadOrderById, loadPayments } from "@/lib/admin-data";
+import { getAdminPermissions, requireAdminPage } from "@/lib/admin-auth";
+import {
+  getOrderPaymentStatus,
+  loadOrderById,
+  loadOrderNotes,
+  loadOrderTimeline,
+  loadPaymentForOrder,
+  loadPayments
+} from "@/lib/admin-data";
 import { formatCurrency } from "@/lib/utils";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
@@ -25,11 +33,20 @@ export default async function AdminOrderDetailPage({
   await requireAdminPage("orders:read");
   const { id } = await params;
   const { print } = await searchParams;
-  const [order, payments] = await Promise.all([loadOrderById(id), loadPayments()]);
+  const [order, payments, permissions, timeline, notes, payment] = await Promise.all([
+    loadOrderById(id),
+    loadPayments(),
+    getAdminPermissions(),
+    loadOrderTimeline(id),
+    loadOrderNotes(id),
+    loadPaymentForOrder(id)
+  ]);
   if (!order) notFound();
 
   const paymentStatus = getOrderPaymentStatus(order, payments);
   const isPrint = print === "1";
+  const canWriteOrders = permissions.includes("orders:write");
+  const canWritePayments = permissions.includes("payments:write");
 
   return (
     <div className={isPrint ? "print:p-8" : ""}>
@@ -53,6 +70,7 @@ export default async function AdminOrderDetailPage({
               <p className="text-sm font-semibold text-foreground">Delivery</p>
               <p className="text-sm text-muted-foreground capitalize">{order.deliveryMethod}</p>
               {order.shippingAddress ? <p className="text-sm text-muted-foreground">{order.shippingAddress}</p> : null}
+              {order.paymentReference ? <p className="text-sm text-muted-foreground">Ref: {order.paymentReference}</p> : null}
             </div>
           </div>
           <div>
@@ -78,6 +96,18 @@ export default async function AdminOrderDetailPage({
           ) : null}
         </CardContent>
       </Card>
+      {!isPrint ? (
+        <div className="mt-6">
+          <OrderDetailPanel
+            order={order}
+            payment={payment}
+            timeline={timeline}
+            notes={notes}
+            canWriteOrders={canWriteOrders}
+            canWritePayments={canWritePayments}
+          />
+        </div>
+      ) : null}
       {isPrint ? <script dangerouslySetInnerHTML={{ __html: "window.print()" }} /> : null}
     </div>
   );

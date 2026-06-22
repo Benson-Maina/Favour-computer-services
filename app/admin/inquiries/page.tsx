@@ -6,13 +6,19 @@ import { loadContactInquiries } from "@/lib/admin-data";
 
 export const metadata: Metadata = { title: "Inquiries" };
 
-export default async function AdminInquiriesPage() {
+export default async function AdminInquiriesPage({
+  searchParams
+}: {
+  searchParams: Promise<{ status?: string }>;
+}) {
   await requireAdminPage("customers:read");
+  const { status } = await searchParams;
   const [inquiries, permissions] = await Promise.all([loadContactInquiries(), getAdminPermissions()]);
+  const initialFilterValues: Record<string, string> = status ? { status } : {};
   return (
     <div>
       <AdminPageHeader title="Inquiries" description="Manage contact form submissions like an inbox." />
-      <InquiriesTable inquiries={inquiries} canWrite={permissions.includes("customers:write")} />
+      <InquiriesTable inquiries={inquiries} canWrite={permissions.includes("customers:write")} initialFilterValues={initialFilterValues} />
     </div>
   );
 }

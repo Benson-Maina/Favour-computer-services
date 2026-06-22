@@ -40,7 +40,15 @@ function StockAdjustForm({ product, canWrite }: { product: Product; canWrite: bo
   );
 }
 
-export function InventoryTable({ products, canWrite }: { products: Product[]; canWrite: boolean }) {
+export function InventoryTable({
+  products,
+  canWrite,
+  initialFilterValues = {}
+}: {
+  products: Product[];
+  canWrite: boolean;
+  initialFilterValues?: Record<string, string>;
+}) {
   const statusLabel = { healthy: "Healthy", low_stock: "Low Stock", out_of_stock: "Out of Stock" };
   const statusVariant = { healthy: "outline" as const, low_stock: "secondary" as const, out_of_stock: "default" as const };
 
@@ -56,11 +64,17 @@ export function InventoryTable({ products, canWrite }: { products: Product[]; ca
           options: [
             { label: "In stock", value: "healthy" },
             { label: "Low stock", value: "low_stock" },
-            { label: "Out of stock", value: "out_of_stock" }
+            { label: "Out of stock", value: "out_of_stock" },
+            { label: "Alerts (low + out)", value: "alerts" }
           ],
-          match: (row, value) => getInventoryStatus(row) === value
+          match: (row, value) => {
+            const status = getInventoryStatus(row);
+            if (value === "alerts") return status === "low_stock" || status === "out_of_stock";
+            return status === value;
+          }
         }
       ]}
+      initialFilterValues={initialFilterValues}
       columns={[
         {
           key: "product",

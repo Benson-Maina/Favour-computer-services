@@ -1,3 +1,4 @@
+import { emptySocialLinks, parseSocialLinks, type SocialLinks } from "@/lib/social-links";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { BlogPost, Booking, Category, Product, Service } from "@/lib/types";
 
@@ -11,8 +12,12 @@ export type BusinessSettings = {
   email: string;
   paybill: string;
   account: string;
+  tillNumber: string;
+  pickupAddress: string;
+  operatingHours: string;
   siteUrl: string;
   description: string;
+  socialLinks: SocialLinks;
 };
 
 export const business: BusinessSettings = {
@@ -23,8 +28,12 @@ export const business: BusinessSettings = {
   email: "bensonmurage254@gmail.com",
   paybill: "247247",
   account: "FAVOUR-U13",
+  tillNumber: "",
+  pickupAddress: "F&F Building, Next to Odeon Cinema, Shop U13, Nairobi, Kenya",
+  operatingHours: "Mon–Sat: 8:00 AM – 6:00 PM",
   siteUrl: process.env.NEXT_PUBLIC_SITE_URL ?? "https://favourcomputerservices.co.ke",
-  description: "Quality electronics, CCTV systems, repairs, networking, and live streaming services in Nairobi."
+  description: "Quality electronics, CCTV systems, repairs, networking, and live streaming services in Nairobi.",
+  socialLinks: emptySocialLinks()
 };
 
 function text(value: unknown, fallback = "") {
@@ -72,6 +81,7 @@ export async function getBusinessSettings(): Promise<BusinessSettings> {
 
   const legacyBusiness = "business";
   const legacyPayment = "payment";
+  const socialRaw = settings.get("social_links");
   return {
     name: settingString(settings, "business_name", nestedSettingString(settings, legacyBusiness, "name", business.name)),
     location: settingString(settings, "business_location", nestedSettingString(settings, legacyBusiness, "location", business.location)),
@@ -80,8 +90,12 @@ export async function getBusinessSettings(): Promise<BusinessSettings> {
     email: settingString(settings, "business_email", nestedSettingString(settings, legacyBusiness, "email", business.email)),
     paybill: settingString(settings, "paybill_number", nestedSettingString(settings, legacyPayment, "paybill_number", business.paybill)),
     account: settingString(settings, "paybill_account", nestedSettingString(settings, legacyPayment, "account_number", business.account)),
+    tillNumber: settingString(settings, "till_number", business.tillNumber),
+    pickupAddress: settingString(settings, "pickup_address", settingString(settings, "business_location", business.pickupAddress)),
+    operatingHours: settingString(settings, "operating_hours", business.operatingHours),
     siteUrl: settingString(settings, "site_url", business.siteUrl),
-    description: settingString(settings, "business_description", business.description)
+    description: settingString(settings, "business_description", business.description),
+    socialLinks: parseSocialLinks(socialRaw)
   };
 }
 

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
@@ -74,6 +75,14 @@ export function UsersTable({ users, currentUserId }: { users: AdminUserRecord[];
               <span className="text-xs text-muted-foreground">Current account</span>
             ) : (
               <div className="space-y-2">
+                <div className="flex flex-wrap gap-1">
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={`/admin/orders?email=${encodeURIComponent(row.email ?? "")}`}>Orders</Link>
+                  </Button>
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={`/admin/bookings/cctv?search=${encodeURIComponent(row.email ?? row.fullName)}`}>Bookings</Link>
+                  </Button>
+                </div>
                 <ActionForm action={updateUserRole} buttonLabel="Update Role" className="flex flex-wrap gap-2">
                   <input type="hidden" name="userId" value={row.id} />
                   <AdminSelect name="role" defaultValue={row.role} className="h-8 min-w-[130px] text-xs">

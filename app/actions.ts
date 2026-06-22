@@ -6,7 +6,7 @@ import { requireUser, getCurrentUserId } from "@/lib/auth";
 import { business, getBusinessSettings } from "@/lib/data";
 import { adminEmailHtml, adminNotificationEmail, sendTransactionalEmail } from "@/lib/email";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { addressSchema, bookingSchema, bookingStatusSchema, brandAdminSchema, bulkInquiryStatusSchema, bulkProductActionSchema, categoryAdminSchema, checkoutSchema, contactInquiryStatusSchema, contactSchema, deleteAddressSchema, inventoryAdjustmentSchema, newsletterSchema, orderStatusSchema, paymentReviewSchema, productAdminSchema, productInquirySchema, productLifecycleSchema, profileSchema, quickProductUpdateSchema, reviewStatusSchema, siteSettingsSchema, testimonialStatusSchema, userRoleSchema, userStatusSchema } from "@/lib/validation";
+import { addressSchema, bookingSchema, bookingStatusSchema, brandAdminSchema, bulkInquiryStatusSchema, bulkProductActionSchema, categoryAdminSchema, checkoutSchema, contactInquiryStatusSchema, contactSchema, deleteAddressSchema, deleteInquirySchema, generateReceiptSchema, inventoryAdjustmentSchema, newsletterSchema, orderStatusSchema, paymentReviewSchema, productAdminSchema, productInquirySchema, productLifecycleSchema, profileSchema, quickProductUpdateSchema, reviewStatusSchema, siteSettingsSchema, testimonialStatusSchema, userRoleSchema, userStatusSchema } from "@/lib/validation";
 
 type ActionState = { 
   ok: boolean; 
@@ -624,11 +624,13 @@ export async function updateOrderStatus(_: ActionState, formData: FormData): Pro
 
   if (!parsed.success) return { ok: false, message: "Choose a valid order status." };
   const supabase = createAdminClient();
-  if (supabase) {
-    const { data: orderBefore } = await supabase.from("orders").select("*").eq("id", parsed.data.orderId).single();
-    const updatePayload: Record<string, string> = { status: parsed.data.status };
-    if (parsed.data.status === "ready_for_pickup") updatePayload.pickup_code = orderBefore?.pickup_code ?? `FCS-${parsed.data.orderId.slice(0, 6).toUpperCase()}`;
-    if (parsed.data.status === "delivered" || parsed.data.status === "completed") updatePayload.collection_date = new Date().toISOString();
+  if (!supabase) return { ok: false, message: "Service unavailable. Please try again." };
+  const { data: orderBefore } = await supabase.from("orders").select("*").eq("id", parsed.data.orderId).single();
+  const previousStatus = text(orderBefore?.status);
+  const updatePayload: Record<string, string> = { status: parsed.data.status };
+  if (parsed.data.status === "ready_for_pickup") updatePayload.pickup_code = orderBefore?.pickup_code ?? `FCS-${parsed.data.orderId.slice(0, 6).toUpperCase()}`;
+  if (parsed.data.status === "delivered" || parsed.data.status === "completed") updatePayload.collection_date = new Date().toISOString();
+  if (previousStatus !== parsed.data.status) {
     await supabase.from("orders").update(updatePayload).eq("id", parsed.data.orderId);
     await supabase.from("order_timeline").insert({
       order_id: parsed.data.orderId,
@@ -638,20 +640,32 @@ export async function updateOrderStatus(_: ActionState, formData: FormData): Pro
     if (parsed.data.status === "cancelled") {
       await supabase.rpc("restore_stock_for_cancelled_order", { order_id_input: parsed.data.orderId });
     }
-    if (parsed.data.note) {
-      await supabase.from("order_notes").insert({
+  }
+  if (parsed.data.note) {
+    await supabase.from("order_notes").insert({
+      order_id: parsed.data.orderId,
+      note: parsed.data.note,
+      notify_customer: parsed.data.notifyCustomer ?? false
+    });
+    if (!parsed.data.notifyCustomer || previousStatus === parsed.data.status) {
+      await supabase.from("order_timeline").insert({
         order_id: parsed.data.orderId,
-        note: parsed.data.note,
-        notify_customer: parsed.data.notifyCustomer ?? false
+        label: parsed.data.notifyCustomer ? `Note sent to customer: ${parsed.data.note}` : `Note added: ${parsed.data.note}`,
+        actor_name: "Admin"
       });
     }
+  }
+  if (previousStatus !== parsed.data.status || parsed.data.note) {
     await supabase.rpc("log_audit", {
       action_input: "Order Updated",
       entity_input: parsed.data.orderId,
-      details_input: `Status changed to ${parsed.data.status}`,
+      details_input: parsed.data.note
+        ? `Note: ${parsed.data.note}${previousStatus !== parsed.data.status ? ` (status: ${parsed.data.status})` : ""}`
+        : `Status changed to ${parsed.data.status}`,
       user_name_input: "Admin"
     });
-    if (parsed.data.notifyCustomer && orderBefore?.customer_email) {
+  }
+  if (parsed.data.notifyCustomer && orderBefore?.customer_email && (previousStatus !== parsed.data.status || parsed.data.note)) {
       const eventType = parsed.data.status === "ready_for_pickup" ? "store_pickup_ready" : parsed.data.status === "delivered" || parsed.data.status === "completed" ? "order_delivered" : "order_status_update";
       await sendTransactionalEmail({
         to: orderBefore.customer_email,
@@ -662,7 +676,6 @@ export async function updateOrderStatus(_: ActionState, formData: FormData): Pro
           { title: "Order Details", rows: [["Order ID", parsed.data.orderId], ["Status", parsed.data.status], ["Pickup Code", updatePayload.pickup_code], ["Customer", orderBefore.customer_name]] }
         ])
       });
-    }
   }
   revalidatePath("/admin");
   return { ok: true, message: "Order status updated." };
@@ -680,63 +693,62 @@ export async function reviewPayment(_: ActionState, formData: FormData): Promise
 
   if (!parsed.success) return { ok: false, message: "Payment review is incomplete." };
   const supabase = createAdminClient();
-  if (supabase) {
-    const verified = parsed.data.action === "verify";
-    const { data: paymentBefore } = await supabase.from("payments").select("verified,rejected").eq("id", parsed.data.paymentId).single();
-    if (verified && paymentBefore?.verified) {
-      return { ok: true, message: "Payment was already verified." };
-    }
-    await supabase
-      .from("payments")
-      .update({
-        verified,
-        rejected: !verified,
-        status: verified ? "approved" : "rejected",
-        rejection_reason: verified ? null : parsed.data.rejectionReason,
-        verified_at: verified ? new Date().toISOString() : null
-      })
-      .eq("id", parsed.data.paymentId);
-    await supabase.from("payment_logs").insert({
-      payment_id: parsed.data.paymentId,
-      order_id: parsed.data.orderId,
-      action: verified ? "verified" : "rejected",
-      note: parsed.data.rejectionReason,
-      actor_name: parsed.data.actor
-    });
-    if (verified) {
-      await supabase.from("orders").update({ status: "payment_verified", payment_status: "approved" }).eq("id", parsed.data.orderId);
-      await supabase.rpc("reduce_stock_for_paid_order", { order_id_input: parsed.data.orderId });
-      await supabase.rpc("generate_receipt_for_order", { order_id_input: parsed.data.orderId });
-    } else {
-      await supabase.from("orders").update({ payment_status: "rejected" }).eq("id", parsed.data.orderId);
-    }
-    await supabase.from("order_timeline").insert({
-      order_id: parsed.data.orderId,
-      label: verified ? "Payment Approved" : "Payment Rejected",
-      actor_name: parsed.data.actor
-    });
-    const { data: order } = await supabase.from("orders").select("customer_name,customer_email,customer_phone,total,payment_reference").eq("id", parsed.data.orderId).single();
-    if (order?.customer_email) {
-      await sendTransactionalEmail({
-        to: order.customer_email,
-        subject: verified ? "Payment approved" : "Payment needs attention",
-        eventType: "payment_approval",
-        referenceId: parsed.data.orderId,
-        html: adminEmailHtml(verified ? "Payment approved" : "Payment rejected", verified ? "Your payment has been approved and your order is now being processed." : (parsed.data.rejectionReason || "Your payment could not be verified. Please contact us for support."), [
-          { title: "Order Details", rows: [["Order ID", parsed.data.orderId], ["Payment Reference", order.payment_reference], ["Total", `KES ${Number(order.total ?? 0).toLocaleString("en-KE")}`]] }
-        ])
-      });
-    }
+  if (!supabase) return { ok: false, message: "Service unavailable. Please try again." };
+  const verified = parsed.data.action === "verify";
+  const { data: paymentBefore } = await supabase.from("payments").select("verified,rejected").eq("id", parsed.data.paymentId).single();
+  if (verified && paymentBefore?.verified) {
+    return { ok: true, message: "Payment was already verified." };
+  }
+  await supabase
+    .from("payments")
+    .update({
+      verified,
+      rejected: !verified,
+      status: verified ? "approved" : "rejected",
+      rejection_reason: verified ? null : parsed.data.rejectionReason,
+      verified_at: verified ? new Date().toISOString() : null
+    })
+    .eq("id", parsed.data.paymentId);
+  await supabase.from("payment_logs").insert({
+    payment_id: parsed.data.paymentId,
+    order_id: parsed.data.orderId,
+    action: verified ? "verified" : "rejected",
+    note: parsed.data.rejectionReason,
+    actor_name: parsed.data.actor
+  });
+  if (verified) {
+    await supabase.from("orders").update({ status: "payment_verified", payment_status: "approved" }).eq("id", parsed.data.orderId);
+    await supabase.rpc("reduce_stock_for_paid_order", { order_id_input: parsed.data.orderId });
+    await supabase.rpc("generate_receipt_for_order", { order_id_input: parsed.data.orderId });
+  } else {
+    await supabase.from("orders").update({ payment_status: "rejected" }).eq("id", parsed.data.orderId);
+  }
+  await supabase.from("order_timeline").insert({
+    order_id: parsed.data.orderId,
+    label: verified ? "Payment Approved" : "Payment Rejected",
+    actor_name: parsed.data.actor
+  });
+  const { data: order } = await supabase.from("orders").select("customer_name,customer_email,customer_phone,total,payment_reference").eq("id", parsed.data.orderId).single();
+  if (order?.customer_email) {
     await sendTransactionalEmail({
-      to: adminNotificationEmail,
-      subject: verified ? `Payment approved: ${parsed.data.orderId.slice(0, 8).toUpperCase()}` : `Payment rejected: ${parsed.data.orderId.slice(0, 8).toUpperCase()}`,
+      to: order.customer_email,
+      subject: verified ? "Payment approved" : "Payment needs attention",
       eventType: "payment_approval",
       referenceId: parsed.data.orderId,
-      html: adminEmailHtml(verified ? "Payment approved" : "Payment rejected", "A payment review was completed in admin.", [
-        { title: "Review Details", rows: [["Order ID", parsed.data.orderId], ["Payment ID", parsed.data.paymentId], ["Actor", parsed.data.actor], ["Rejection Reason", parsed.data.rejectionReason]] }
-      ], adminUrl("/admin"))
+      html: adminEmailHtml(verified ? "Payment approved" : "Payment rejected", verified ? "Your payment has been approved and your order is now being processed." : (parsed.data.rejectionReason || "Your payment could not be verified. Please contact us for support."), [
+        { title: "Order Details", rows: [["Order ID", parsed.data.orderId], ["Payment Reference", order.payment_reference], ["Total", `KES ${Number(order.total ?? 0).toLocaleString("en-KE")}`]] }
+      ])
     });
   }
+  await sendTransactionalEmail({
+    to: adminNotificationEmail,
+    subject: verified ? `Payment approved: ${parsed.data.orderId.slice(0, 8).toUpperCase()}` : `Payment rejected: ${parsed.data.orderId.slice(0, 8).toUpperCase()}`,
+    eventType: "payment_approval",
+    referenceId: parsed.data.orderId,
+    html: adminEmailHtml(verified ? "Payment approved" : "Payment rejected", "A payment review was completed in admin.", [
+      { title: "Review Details", rows: [["Order ID", parsed.data.orderId], ["Payment ID", parsed.data.paymentId], ["Actor", parsed.data.actor], ["Rejection Reason", parsed.data.rejectionReason]] }
+    ], adminUrl("/admin"))
+  });
   revalidatePath("/admin");
   return { ok: true, message: parsed.data.action === "verify" ? "Payment verified." : "Payment rejected with reason." };
 }
@@ -768,91 +780,90 @@ export async function saveProduct(_: ActionState, formData: FormData): Promise<A
 
   if (!parsed.success) return { ok: false, message: "Product details are incomplete." };
   const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable. Please try again." };
   let savedProductId: string | undefined;
-  if (supabase) {
-    let specs: Record<string, unknown> = {};
-    try {
-      specs = parsed.data.specifications ? JSON.parse(parsed.data.specifications) : {};
-    } catch {
-      return { ok: false, message: "Specifications must be valid JSON." };
-    }
-    const categorySlug = slugify(parsed.data.category);
-    const brandSlug = slugify(parsed.data.brand);
-    const [{ data: category }, { data: brand }] = await Promise.all([
-      supabase.from("categories").upsert({ name: parsed.data.category, slug: categorySlug }, { onConflict: "slug" }).select("id").single(),
-      supabase.from("brands").upsert({ name: parsed.data.brand, slug: brandSlug }, { onConflict: "slug" }).select("id").single()
-    ]);
-    const imageUrls = parseImageList(parsed.data.images ?? "");
-    const uploadSlug = parsed.data.slug || slugify(parsed.data.name);
-    const uploadedImages = await Promise.all(
-      formData
-        .getAll("productImages")
-        .map((file) => uploadStorageFile("products", uploadSlug, file))
-    );
-    const uploadedEntries = uploadedImages
-      .filter((image): image is { path: string; publicUrl: string } => Boolean(image?.publicUrl));
-    const featuredImage = getString(formData, "featuredImage");
-    const images = [...imageUrls.filter((url) => url !== featuredImage), ...uploadedEntries.map((image) => image.publicUrl)];
-    if (featuredImage) images.unshift(featuredImage);
-    const productId = getString(formData, "productId");
-
-    const productPayload: Row = {
-      category_id: category?.id,
-      brand_id: brand?.id,
-      name: parsed.data.name,
-      slug: parsed.data.slug || slugify(parsed.data.name),
-      sku: parsed.data.sku,
-      description: parsed.data.description,
-      condition: parsed.data.productCondition,
-      status: parsed.data.availabilityStatus,
-      cost_price: parsed.data.costPrice ?? 0,
-      price: parsed.data.price,
-      sale_price: parsed.data.salePrice,
-      stock: parsed.data.stock,
-      low_stock_threshold: parsed.data.lowStockThreshold,
-      specs,
-      images,
-      featured: parsed.data.featured ?? false,
-      new_arrival: parsed.data.newArrival ?? false,
-      warranty: parsed.data.warranty,
-      supplier_name: parsed.data.supplierName,
-      supplier_contact: parsed.data.supplierContact
-    };
-    if (productId) productPayload.id = productId;
-
-    const { data: savedProduct, error: productError } = await supabase.from("products").upsert(productPayload, { onConflict: "slug" }).select("id").single();
-    if (productError) {
-      console.error("Product save error:", productError);
-      return { ok: false, message: "Product could not be saved." };
-    }
-    if (savedProduct?.id) {
-      const { data: previousImages } = await supabase.from("product_images").select("storage_path,public_url").eq("product_id", savedProduct.id);
-      const desired = new Set(images);
-      const removedStorageValues = (previousImages ?? [])
-        .flatMap((image) => [text((image as Row).storage_path), text((image as Row).public_url)])
-        .filter((value) => value && !desired.has(value));
-      await removeStorageObjects("products", removedStorageValues);
-      await supabase.from("product_images").delete().eq("product_id", savedProduct.id);
-      if (images.length) {
-        const uploadedByUrl = new Map(uploadedEntries.map((image) => [image.publicUrl, image.path]));
-        await supabase.from("product_images").insert(images.map((url, index) => ({
-          product_id: savedProduct.id,
-          storage_path: uploadedByUrl.get(url) ?? storagePathFromPublicUrl("products", url) ?? url,
-          public_url: url,
-          alt_text: parsed.data.name,
-          sort_order: index,
-          is_primary: index === 0
-        })));
-      }
-    }
-    await supabase.rpc("log_audit", {
-      action_input: "Product Saved",
-      entity_input: parsed.data.sku,
-      details_input: `${parsed.data.name} saved with status ${parsed.data.availabilityStatus}`,
-      user_name_input: "Admin"
-    });
-    savedProductId = savedProduct?.id;
+  let specs: Record<string, unknown> = {};
+  try {
+    specs = parsed.data.specifications ? JSON.parse(parsed.data.specifications) : {};
+  } catch {
+    return { ok: false, message: "Specifications must be valid JSON." };
   }
+  const categorySlug = slugify(parsed.data.category);
+  const brandSlug = slugify(parsed.data.brand);
+  const [{ data: category }, { data: brand }] = await Promise.all([
+    supabase.from("categories").upsert({ name: parsed.data.category, slug: categorySlug }, { onConflict: "slug" }).select("id").single(),
+    supabase.from("brands").upsert({ name: parsed.data.brand, slug: brandSlug }, { onConflict: "slug" }).select("id").single()
+  ]);
+  const imageUrls = parseImageList(parsed.data.images ?? "");
+  const uploadSlug = parsed.data.slug || slugify(parsed.data.name);
+  const uploadedImages = await Promise.all(
+    formData
+      .getAll("productImages")
+      .map((file) => uploadStorageFile("products", uploadSlug, file))
+  );
+  const uploadedEntries = uploadedImages
+    .filter((image): image is { path: string; publicUrl: string } => Boolean(image?.publicUrl));
+  const featuredImage = getString(formData, "featuredImage");
+  const images = [...imageUrls.filter((url) => url !== featuredImage), ...uploadedEntries.map((image) => image.publicUrl)];
+  if (featuredImage) images.unshift(featuredImage);
+  const productId = getString(formData, "productId");
+
+  const productPayload: Row = {
+    category_id: category?.id,
+    brand_id: brand?.id,
+    name: parsed.data.name,
+    slug: parsed.data.slug || slugify(parsed.data.name),
+    sku: parsed.data.sku,
+    description: parsed.data.description,
+    condition: parsed.data.productCondition,
+    status: parsed.data.availabilityStatus,
+    cost_price: parsed.data.costPrice ?? 0,
+    price: parsed.data.price,
+    sale_price: parsed.data.salePrice,
+    stock: parsed.data.stock,
+    low_stock_threshold: parsed.data.lowStockThreshold,
+    specs,
+    images,
+    featured: parsed.data.featured ?? false,
+    new_arrival: parsed.data.newArrival ?? false,
+    warranty: parsed.data.warranty,
+    supplier_name: parsed.data.supplierName,
+    supplier_contact: parsed.data.supplierContact
+  };
+  if (productId) productPayload.id = productId;
+
+  const { data: savedProduct, error: productError } = await supabase.from("products").upsert(productPayload, { onConflict: "slug" }).select("id").single();
+  if (productError) {
+    console.error("Product save error:", productError);
+    return { ok: false, message: "Product could not be saved." };
+  }
+  if (savedProduct?.id) {
+    const { data: previousImages } = await supabase.from("product_images").select("storage_path,public_url").eq("product_id", savedProduct.id);
+    const desired = new Set(images);
+    const removedStorageValues = (previousImages ?? [])
+      .flatMap((image) => [text((image as Row).storage_path), text((image as Row).public_url)])
+      .filter((value) => value && !desired.has(value));
+    await removeStorageObjects("products", removedStorageValues);
+    await supabase.from("product_images").delete().eq("product_id", savedProduct.id);
+    if (images.length) {
+      const uploadedByUrl = new Map(uploadedEntries.map((image) => [image.publicUrl, image.path]));
+      await supabase.from("product_images").insert(images.map((url, index) => ({
+        product_id: savedProduct.id,
+        storage_path: uploadedByUrl.get(url) ?? storagePathFromPublicUrl("products", url) ?? url,
+        public_url: url,
+        alt_text: parsed.data.name,
+        sort_order: index,
+        is_primary: index === 0
+      })));
+    }
+  }
+  await supabase.rpc("log_audit", {
+    action_input: "Product Saved",
+    entity_input: parsed.data.sku,
+    details_input: `${parsed.data.name} saved with status ${parsed.data.availabilityStatus}`,
+    user_name_input: "Admin"
+  });
+  savedProductId = savedProduct?.id;
   revalidateAdminPaths();
   return { ok: true, message: "Product saved.", productId: savedProductId };
 }
@@ -866,28 +877,41 @@ export async function updateProductLifecycle(_: ActionState, formData: FormData)
   if (!parsed.success) return { ok: false, message: "Invalid product action." };
 
   const supabase = createAdminClient();
-  if (supabase) {
-    if (parsed.data.action === "delete") {
-      const { data: images } = await supabase.from("product_images").select("storage_path,public_url").eq("product_id", parsed.data.productId);
-      await removeStorageObjects("products", (images ?? []).flatMap((image) => [text((image as Row).storage_path), text((image as Row).public_url)]).filter(Boolean));
-      await supabase.from("products").delete().eq("id", parsed.data.productId);
-    }
-    if (parsed.data.action === "archive") await supabase.from("products").update({ status: "archived", archived_at: new Date().toISOString() }).eq("id", parsed.data.productId);
-    if (parsed.data.action === "restore") await supabase.from("products").update({ status: "active", archived_at: null }).eq("id", parsed.data.productId);
-    if (parsed.data.action === "duplicate") {
-      const { data: product } = await supabase.from("products").select("*").eq("id", parsed.data.productId).single();
-      if (product) {
-        const copy = { ...product, id: crypto.randomUUID(), sku: `${product.sku}-COPY`, slug: `${product.slug}-copy`, name: `${product.name} Copy`, status: "draft", created_at: new Date().toISOString() };
-        await supabase.from("products").insert(copy);
+  if (!supabase) return { ok: false, message: "Service unavailable. Please try again." };
+  if (parsed.data.action === "delete") {
+    const { data: images } = await supabase.from("product_images").select("storage_path,public_url").eq("product_id", parsed.data.productId);
+    await removeStorageObjects("products", (images ?? []).flatMap((image) => [text((image as Row).storage_path), text((image as Row).public_url)]).filter(Boolean));
+    await supabase.from("products").delete().eq("id", parsed.data.productId);
+  }
+  if (parsed.data.action === "archive") await supabase.from("products").update({ status: "archived", archived_at: new Date().toISOString() }).eq("id", parsed.data.productId);
+  if (parsed.data.action === "restore") await supabase.from("products").update({ status: "active", archived_at: null }).eq("id", parsed.data.productId);
+  if (parsed.data.action === "duplicate") {
+    const { data: product } = await supabase.from("products").select("*").eq("id", parsed.data.productId).single();
+    if (product) {
+      const newId = crypto.randomUUID();
+      const copy = { ...product, id: newId, sku: `${product.sku}-COPY`, slug: `${product.slug}-copy`, name: `${product.name} Copy`, status: "draft", created_at: new Date().toISOString() };
+      await supabase.from("products").insert(copy);
+      const { data: productImages } = await supabase.from("product_images").select("*").eq("product_id", parsed.data.productId);
+      if (productImages?.length) {
+        await supabase.from("product_images").insert(
+          productImages.map((image) => ({
+            product_id: newId,
+            storage_path: (image as Row).storage_path,
+            public_url: (image as Row).public_url,
+            alt_text: (image as Row).alt_text ?? product.name,
+            sort_order: (image as Row).sort_order ?? 0,
+            is_primary: (image as Row).is_primary ?? false
+          }))
+        );
       }
     }
-    await supabase.rpc("log_audit", {
-      action_input: "Product Lifecycle",
-      entity_input: parsed.data.productId,
-      details_input: `Product action: ${parsed.data.action}`,
-      user_name_input: "Admin"
-    });
   }
+  await supabase.rpc("log_audit", {
+    action_input: "Product Lifecycle",
+    entity_input: parsed.data.productId,
+    details_input: `Product action: ${parsed.data.action}`,
+    user_name_input: "Admin"
+  });
   revalidatePath("/admin");
   revalidatePath("/shop");
   return { ok: true, message: "Product action completed." };
@@ -945,12 +969,29 @@ export async function saveSiteSettings(_: ActionState, formData: FormData): Prom
     businessEmail: getString(formData, "businessEmail"),
     paybillNumber: getString(formData, "paybillNumber"),
     paybillAccount: getString(formData, "paybillAccount"),
+    tillNumber: getString(formData, "tillNumber"),
+    pickupAddress: getString(formData, "pickupAddress"),
+    operatingHours: getString(formData, "operatingHours"),
     siteUrl: getString(formData, "siteUrl"),
-    businessDescription: getString(formData, "businessDescription")
+    businessDescription: getString(formData, "businessDescription"),
+    socialFacebook: getString(formData, "socialFacebook"),
+    socialInstagram: getString(formData, "socialInstagram"),
+    socialTiktok: getString(formData, "socialTiktok"),
+    socialX: getString(formData, "socialX"),
+    socialYoutube: getString(formData, "socialYoutube"),
+    socialLinkedin: getString(formData, "socialLinkedin")
   });
   if (!parsed.success) return { ok: false, message: "Site settings are incomplete." };
   const supabase = createAdminClient();
   if (!supabase) return { ok: false, message: "Service unavailable. Please try again." };
+  const socialLinks = {
+    facebook: parsed.data.socialFacebook ?? "",
+    instagram: parsed.data.socialInstagram ?? "",
+    tiktok: parsed.data.socialTiktok ?? "",
+    x: parsed.data.socialX ?? "",
+    youtube: parsed.data.socialYoutube ?? "",
+    linkedin: parsed.data.socialLinkedin ?? ""
+  };
   const rows = [
     ["business_name", parsed.data.businessName],
     ["business_location", parsed.data.businessLocation],
@@ -959,8 +1000,12 @@ export async function saveSiteSettings(_: ActionState, formData: FormData): Prom
     ["business_email", parsed.data.businessEmail],
     ["paybill_number", parsed.data.paybillNumber],
     ["paybill_account", parsed.data.paybillAccount],
+    ["till_number", parsed.data.tillNumber ?? ""],
+    ["pickup_address", parsed.data.pickupAddress],
+    ["operating_hours", parsed.data.operatingHours],
     ["site_url", parsed.data.siteUrl],
-    ["business_description", parsed.data.businessDescription]
+    ["business_description", parsed.data.businessDescription],
+    ["social_links", socialLinks]
   ].map(([key, value]) => ({ key, value }));
   const { error } = await supabase.from("site_settings").upsert(rows, { onConflict: "key" });
   if (error) return { ok: false, message: "Site settings could not be saved." };
@@ -1252,4 +1297,40 @@ export async function updateTestimonialStatus(_: ActionState, formData: FormData
   if (error) return { ok: false, message: "Testimonial could not be updated." };
   revalidateAdminPaths();
   return { ok: true, message: parsed.data.approved ? "Testimonial approved." : "Testimonial unapproved." };
+}
+
+export async function deleteContactInquiry(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requirePermission("customers:write");
+  const parsed = deleteInquirySchema.safeParse({ inquiryId: getString(formData, "inquiryId") });
+  if (!parsed.success) return { ok: false, message: "Invalid inquiry." };
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable." };
+  const { error } = await supabase.from("contact_inquiries").delete().eq("id", parsed.data.inquiryId);
+  if (error) return { ok: false, message: "Inquiry could not be deleted." };
+  await supabase.rpc("log_audit", {
+    action_input: "Contact Inquiry Deleted",
+    entity_input: parsed.data.inquiryId,
+    details_input: "Inquiry removed from inbox.",
+    user_name_input: "Admin"
+  });
+  revalidatePath("/admin");
+  return { ok: true, message: "Inquiry deleted." };
+}
+
+export async function generateOrderReceipt(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requirePermission("orders:write");
+  const parsed = generateReceiptSchema.safeParse({ orderId: getString(formData, "orderId") });
+  if (!parsed.success) return { ok: false, message: "Invalid order." };
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, message: "Service unavailable." };
+  const { error } = await supabase.rpc("generate_receipt_for_order", { order_id_input: parsed.data.orderId });
+  if (error) return { ok: false, message: "Receipt could not be generated." };
+  await supabase.rpc("log_audit", {
+    action_input: "Receipt Generated",
+    entity_input: parsed.data.orderId,
+    details_input: "Receipt generated for order.",
+    user_name_input: "Admin"
+  });
+  revalidatePath("/admin");
+  return { ok: true, message: "Receipt generated." };
 }

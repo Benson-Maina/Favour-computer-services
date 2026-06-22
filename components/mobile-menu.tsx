@@ -3,9 +3,17 @@
 import Link from "next/link";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
+import { SocialLinksIcons } from "@/components/social-links";
 import { Button } from "@/components/ui/button";
+import type { SocialLinks } from "@/lib/social-links";
 
-export function MobileMenu({ links }: { links: ReadonlyArray<readonly [string, string]> }) {
+export function MobileMenu({
+  links,
+  socialLinks
+}: {
+  links: ReadonlyArray<readonly [string, string]>;
+  socialLinks?: SocialLinks;
+}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -22,6 +30,11 @@ export function MobileMenu({ links }: { links: ReadonlyArray<readonly [string, s
               </Link>
             ))}
           </nav>
+          {socialLinks ? (
+            <div className="container border-t py-3">
+              <SocialLinksIcons links={socialLinks} />
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

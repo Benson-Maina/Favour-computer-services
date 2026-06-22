@@ -154,6 +154,20 @@ export type AuditLogRecord = {
   createdAt: string;
 };
 
+export type OrderTimelineEntry = {
+  id: string;
+  label: string;
+  actorName: string;
+  createdAt: string;
+};
+
+export type OrderNoteRecord = {
+  id: string;
+  note: string;
+  notifyCustomer: boolean;
+  createdAt: string;
+};
+
 export type NewsletterRecord = {
   id: string;
   email: string;
@@ -246,6 +260,37 @@ export async function loadOrderById(id: string) {
   return data ? mapOrder(data as Row) : null;
 }
 
+export async function loadOrderTimeline(orderId: string): Promise<OrderTimelineEntry[]> {
+  const supabase = createAdminClient();
+  if (!supabase) return [];
+  const { data } = await supabase.from("order_timeline").select("*").eq("order_id", orderId).order("created_at", { ascending: true });
+  return (data ?? []).map((row) => ({
+    id: text((row as Row).id),
+    label: text((row as Row).label),
+    actorName: text((row as Row).actor_name, "Admin"),
+    createdAt: text((row as Row).created_at, new Date().toISOString())
+  }));
+}
+
+export async function loadOrderNotes(orderId: string): Promise<OrderNoteRecord[]> {
+  const supabase = createAdminClient();
+  if (!supabase) return [];
+  const { data } = await supabase.from("order_notes").select("*").eq("order_id", orderId).order("created_at", { ascending: false });
+  return (data ?? []).map((row) => ({
+    id: text((row as Row).id),
+    note: text((row as Row).note),
+    notifyCustomer: Boolean((row as Row).notify_customer),
+    createdAt: text((row as Row).created_at, new Date().toISOString())
+  }));
+}
+
+export async function loadPaymentForOrder(orderId: string) {
+  const supabase = createAdminClient();
+  if (!supabase) return null;
+  const { data } = await supabase.from("payments").select("*").eq("order_id", orderId).maybeSingle();
+  return data ? mapPayment(data as Row) : null;
+}
+
 export async function loadPayments() {
   const supabase = createAdminClient();
   if (!supabase) return [];
@@ -326,7 +371,7 @@ export async function loadUsers(): Promise<AdminUserRecord[]> {
 export async function loadReviews(): Promise<ReviewRecord[]> {
   const supabase = createAdminClient();
   if (!supabase) return [];
-  const { data } = await supabase.from("reviews").select("id,rating,comment,approved,created_at,user_id,products(name),users(full_name)").order("created_at", { ascending: false });
+  const { data } = await supabase.from("reviews").select("id,rating,body,approved,created_at,user_id,products(name),users(full_name)").order("created_at", { ascending: false });
   return (data ?? []).map((row) => {
     const products = objectValue((row as Row).products);
     const users = objectValue((row as Row).users);
@@ -335,7 +380,7 @@ export async function loadReviews(): Promise<ReviewRecord[]> {
       productName: text(products.name, "Unknown product"),
       userName: text(users.full_name, "Customer"),
       rating: numberValue((row as Row).rating),
-      comment: text((row as Row).comment),
+      comment: text((row as Row).body),
       approved: Boolean((row as Row).approved),
       createdAt: text((row as Row).created_at, new Date().toISOString())
     };
@@ -360,16 +405,19 @@ export async function loadTestimonials(): Promise<TestimonialRecord[]> {
 export async function loadReceipts(): Promise<ReceiptRecord[]> {
   const supabase = createAdminClient();
   if (!supabase) return [];
-  const { data } = await supabase.from("receipts").select("*").order("created_at", { ascending: false });
-  return (data ?? []).map((row) => ({
-    id: text((row as Row).id),
-    receiptNumber: text((row as Row).receipt_number),
-    orderId: text((row as Row).order_id),
-    customerName: text((row as Row).customer_name),
-    total: numberValue((row as Row).total),
-    paymentStatus: text((row as Row).payment_status, "pending_verification"),
-    createdAt: text((row as Row).created_at, new Date().toISOString())
-  }));
+  const { data } = await supabase.from("receipts").select("*, orders(payment_status)").order("created_at", { ascending: false });
+  return (data ?? []).map((row) => {
+    const order = objectValue((row as Row).orders);
+    return {
+      id: text((row as Row).id),
+      receiptNumber: text((row as Row).receipt_number),
+      orderId: text((row as Row).order_id),
+      customerName: text((row as Row).customer_name),
+      total: numberValue((row as Row).total),
+      paymentStatus: text(order.payment_status, "approved"),
+      createdAt: text((row as Row).created_at, new Date().toISOString())
+    };
+  });
 }
 
 export async function loadAuditLogs(): Promise<AuditLogRecord[]> {

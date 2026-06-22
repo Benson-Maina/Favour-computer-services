@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Loader2, LockKeyhole } from "lucide-react";
 import { toast } from "sonner";
 import { submitCheckout } from "@/app/actions";
+import { SocialLinksIcons } from "@/components/social-links";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -52,6 +53,9 @@ export function CheckoutPageClient({ business }: { business: BusinessSettings })
               <div className="mt-6 flex flex-wrap justify-center gap-3">
                 <Button asChild><Link href="/shop">Continue Shopping</Link></Button>
                 <Button asChild variant="outline"><Link href="/account/orders">View Account Orders</Link></Button>
+              </div>
+              <div className="mt-6 flex justify-center">
+                <SocialLinksIcons links={business.socialLinks} />
               </div>
             </CardContent>
           </Card>

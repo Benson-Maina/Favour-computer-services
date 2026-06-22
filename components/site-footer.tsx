@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Mail, MapPin, Phone } from "lucide-react";
+import { SocialLinksIcons } from "@/components/social-links";
 import { getBusinessSettings, getCategories, getServices } from "@/lib/data";
 
 export async function SiteFooter() {
@@ -10,6 +11,7 @@ export async function SiteFooter() {
         <div className="space-y-4">
           <h2 className="text-lg font-bold text-white">{business.name}</h2>
           <p className="text-sm text-slate-400">{business.description}</p>
+          <SocialLinksIcons links={business.socialLinks} variant="footer" />
         </div>
         <div>
           <h3 className="mb-3 font-semibold text-white">Shop</h3>
@@ -25,9 +27,10 @@ export async function SiteFooter() {
         </div>
         <div className="space-y-3 text-sm">
           <h3 className="font-semibold text-white">Contact</h3>
-          <p className="flex gap-2"><MapPin className="mt-0.5 size-4" /> {business.location}</p>
-          <p className="flex gap-2"><Phone className="size-4" /> {business.phone}</p>
-          <p className="flex gap-2"><Mail className="size-4" /> {business.email}</p>
+          <p className="flex gap-2"><MapPin className="mt-0.5 size-4 shrink-0" /> {business.location}</p>
+          <p className="flex gap-2"><Phone className="size-4 shrink-0" /> {business.phone}</p>
+          <p className="flex gap-2"><Mail className="size-4 shrink-0" /> {business.email}</p>
+          {business.operatingHours ? <p className="text-slate-400">{business.operatingHours}</p> : null}
         </div>
       </div>
       <div className="border-t border-white/10 py-4 text-center text-xs text-slate-400">

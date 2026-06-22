@@ -1,6 +1,7 @@
 import { Mail, MapPin, Phone } from "lucide-react";
 import { submitContact } from "@/app/actions";
 import { ActionForm } from "@/components/action-form-status";
+import { SocialLinksIcons } from "@/components/social-links";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,7 +14,18 @@ export default async function ContactPage() {
       <div className="space-y-5">
         <h1 className="text-4xl font-black">Contact Favour Computer Services</h1>
         <p className="text-muted-foreground">Visit our Nairobi shop, call, WhatsApp, or send a message for product and service inquiries.</p>
-        <Card><CardContent className="space-y-3 p-5"><p className="flex gap-2"><MapPin className="size-5 text-primary" /> {business.location}</p><p className="flex gap-2"><Phone className="size-5 text-primary" /> {business.phone}</p><p className="flex gap-2"><Mail className="size-5 text-primary" /> {business.email}</p></CardContent></Card>
+        <Card>
+          <CardContent className="space-y-3 p-5">
+            <p className="flex gap-2"><MapPin className="size-5 text-primary shrink-0" /> {business.location}</p>
+            {business.pickupAddress && business.pickupAddress !== business.location ? (
+              <p className="flex gap-2 text-sm text-muted-foreground"><MapPin className="size-4 shrink-0" /> Pickup: {business.pickupAddress}</p>
+            ) : null}
+            <p className="flex gap-2"><Phone className="size-5 text-primary shrink-0" /> {business.phone}</p>
+            <p className="flex gap-2"><Mail className="size-5 text-primary shrink-0" /> {business.email}</p>
+            {business.operatingHours ? <p className="text-sm text-muted-foreground">{business.operatingHours}</p> : null}
+            <SocialLinksIcons links={business.socialLinks} className="pt-2" />
+          </CardContent>
+        </Card>
         <div className="aspect-[16/10] overflow-hidden rounded-lg border bg-secondary">
           <iframe title="Favour Computer Services map" src="https://www.google.com/maps?q=Odeon%20Cinema%20Nairobi&output=embed" className="size-full" loading="lazy" />
         </div>

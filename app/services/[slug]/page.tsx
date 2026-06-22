@@ -4,11 +4,12 @@ import { notFound } from "next/navigation";
 import { MessageCircle } from "lucide-react";
 import { submitBooking } from "@/app/actions";
 import { ActionForm } from "@/components/action-form-status";
+import { SocialLinksIcons } from "@/components/social-links";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { getServices } from "@/lib/data";
+import { getBusinessSettings, getServices } from "@/lib/data";
 import { whatsappUrl } from "@/lib/utils";
 
 export async function generateStaticParams() {
@@ -18,7 +19,7 @@ export async function generateStaticParams() {
 
 export default async function ServicePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const services = await getServices();
+  const [services, business] = await Promise.all([getServices(), getBusinessSettings()]);
   const service = services.find((item) => item.slug === slug);
   if (!service) notFound();
 
@@ -73,6 +74,9 @@ export default async function ServicePage({ params }: { params: Promise<{ slug: 
               <Textarea name="message" placeholder="Tell us what you need" required />
             </ActionForm>
             <Button asChild variant="outline" className="mt-3 w-full"><Link href={whatsappUrl(`Hello Favour Computer Services, I need ${service.title}.`)}><MessageCircle className="mr-2 size-4" /> WhatsApp Service Inquiry</Link></Button>
+            <div className="mt-4 flex justify-center">
+              <SocialLinksIcons links={business.socialLinks} />
+            </div>
           </CardContent>
         </Card>
       </div>

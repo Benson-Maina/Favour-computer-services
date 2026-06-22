@@ -66,6 +66,14 @@ export function ProductForm({ product, categories, brands, canWrite }: ProductFo
   const [stock, setStock] = useState(String(initial.stock ?? 0));
   const [status, setStatus] = useState<Product["status"]>(initial.status ?? "draft");
   const [featured, setFeatured] = useState(Boolean(initial.featured));
+  const [productCondition, setProductCondition] = useState<Product["condition"]>(initial.condition ?? "new");
+  const [costPrice, setCostPrice] = useState(String(initial.costPrice ?? 0));
+  const [warranty, setWarranty] = useState(initial.warranty ?? "");
+  const [supplierName, setSupplierName] = useState(initial.supplierName ?? "");
+  const [supplierContact, setSupplierContact] = useState(initial.supplierContact ?? "");
+  const [lowStockThreshold, setLowStockThreshold] = useState(String(initial.lowStockThreshold ?? 3));
+  const [specifications, setSpecifications] = useState(JSON.stringify(initial.specs ?? {}, null, 2));
+  const [newArrival, setNewArrival] = useState(Boolean(initial.newArrival));
 
   useEffect(() => {
     const stored = localStorage.getItem(draftKey);
@@ -148,13 +156,14 @@ export function ProductForm({ product, categories, brands, canWrite }: ProductFo
       <input type="hidden" name="featured" value={featured ? "on" : ""} />
       {!advancedOpen ? (
         <>
-          <input type="hidden" name="productCondition" value={initial.condition ?? "new"} />
-          <input type="hidden" name="specifications" value={JSON.stringify(initial.specs ?? {})} />
-          <input type="hidden" name="costPrice" value={initial.costPrice ?? 0} />
-          <input type="hidden" name="warranty" value={initial.warranty ?? ""} />
-          <input type="hidden" name="supplierName" value={initial.supplierName ?? ""} />
-          <input type="hidden" name="supplierContact" value={initial.supplierContact ?? ""} />
-          <input type="hidden" name="lowStockThreshold" value={initial.lowStockThreshold ?? 3} />
+          <input type="hidden" name="productCondition" value={productCondition} />
+          <input type="hidden" name="specifications" value={specifications} />
+          <input type="hidden" name="costPrice" value={costPrice} />
+          <input type="hidden" name="warranty" value={warranty} />
+          <input type="hidden" name="supplierName" value={supplierName} />
+          <input type="hidden" name="supplierContact" value={supplierContact} />
+          <input type="hidden" name="lowStockThreshold" value={lowStockThreshold} />
+          {newArrival ? <input type="hidden" name="newArrival" value="on" /> : null}
         </>
       ) : null}
 
@@ -236,21 +245,21 @@ export function ProductForm({ product, categories, brands, canWrite }: ProductFo
         </button>
         {advancedOpen ? (
           <div className="space-y-4 border-t border-border p-4">
-            <AdminSelect name="productCondition" defaultValue={initial.condition ?? "new"}>
+            <AdminSelect name="productCondition" value={productCondition} onChange={(e) => setProductCondition(e.target.value as Product["condition"])}>
               <option value="new">New</option>
               <option value="refurbished">Refurbished</option>
               <option value="used">Used</option>
             </AdminSelect>
-            <Textarea name="specifications" defaultValue={JSON.stringify(initial.specs ?? {}, null, 2)} placeholder="Specifications JSON" rows={4} />
+            <Textarea name="specifications" value={specifications} onChange={(e) => setSpecifications(e.target.value)} placeholder="Specifications JSON" rows={4} />
             <div className="grid gap-3 sm:grid-cols-2">
-              <Input name="costPrice" type="number" defaultValue={initial.costPrice} placeholder="Cost price" />
-              <Input name="warranty" defaultValue={initial.warranty} placeholder="Warranty" />
-              <Input name="supplierName" defaultValue={initial.supplierName} placeholder="Supplier name" />
-              <Input name="supplierContact" defaultValue={initial.supplierContact} placeholder="Supplier contact" />
-              <Input name="lowStockThreshold" type="number" defaultValue={initial.lowStockThreshold ?? 3} placeholder="Low stock threshold" />
+              <Input name="costPrice" type="number" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} placeholder="Cost price" />
+              <Input name="warranty" value={warranty} onChange={(e) => setWarranty(e.target.value)} placeholder="Warranty" />
+              <Input name="supplierName" value={supplierName} onChange={(e) => setSupplierName(e.target.value)} placeholder="Supplier name" />
+              <Input name="supplierContact" value={supplierContact} onChange={(e) => setSupplierContact(e.target.value)} placeholder="Supplier contact" />
+              <Input name="lowStockThreshold" type="number" value={lowStockThreshold} onChange={(e) => setLowStockThreshold(e.target.value)} placeholder="Low stock threshold" />
             </div>
             <label className="flex items-center gap-2 text-sm text-foreground">
-              <input name="newArrival" type="checkbox" defaultChecked={initial.newArrival} className="size-4 rounded border-input" />
+              <input name="newArrival" type="checkbox" checked={newArrival} onChange={(e) => setNewArrival(e.target.checked)} className="size-4 rounded border-input" />
               New arrival
             </label>
           </div>

@@ -36,6 +36,8 @@ type AdminDataTableProps<T extends { id: string }> = {
   onBulkAction?: (action: string, ids: string[]) => void;
   emptyTitle?: string;
   getSearchText?: (row: T) => string;
+  initialFilterValues?: Record<string, string>;
+  initialSearch?: string;
 };
 
 export function AdminDataTable<T extends { id: string }>({
@@ -47,10 +49,12 @@ export function AdminDataTable<T extends { id: string }>({
   bulkActions = [],
   onBulkAction,
   emptyTitle = "No records found.",
-  getSearchText
+  getSearchText,
+  initialFilterValues = {},
+  initialSearch = ""
 }: AdminDataTableProps<T>) {
-  const [query, setQuery] = useState("");
-  const [filterValues, setFilterValues] = useState<Record<string, string>>({});
+  const [query, setQuery] = useState(initialSearch);
+  const [filterValues, setFilterValues] = useState<Record<string, string>>(initialFilterValues);
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);

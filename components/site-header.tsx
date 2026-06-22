@@ -4,6 +4,7 @@ import { AccountHeaderButton } from "@/components/account-header-button";
 import { CartIconLink } from "@/components/cart-icon-link";
 import { MobileMenu } from "@/components/mobile-menu";
 import { SearchPanel } from "@/components/search-panel";
+import { SocialLinksIcons } from "@/components/social-links";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 const nav = [
@@ -23,7 +24,10 @@ export async function SiteHeader() {
       <div className="bg-slate-950 py-2 text-xs text-white">
         <div className="container flex flex-wrap items-center justify-between gap-2">
           <span>{business.location}</span>
-          <span>Call or WhatsApp: {business.phone}</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <span>Call or WhatsApp: {business.phone}</span>
+            <SocialLinksIcons links={business.socialLinks} iconClassName="size-3.5" className="gap-0" variant="footer" />
+          </div>
         </div>
       </div>
       <div className="container flex h-16 items-center justify-between gap-4">
@@ -43,7 +47,7 @@ export async function SiteHeader() {
           <CartIconLink />
           <AccountHeaderButton />
           <ThemeToggle />
-          <MobileMenu links={nav} />
+          <MobileMenu links={nav} socialLinks={business.socialLinks} />
         </div>
       </div>
       <div className="hidden border-t bg-secondary/40 py-2 md:block">

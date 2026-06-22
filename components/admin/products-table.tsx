@@ -28,7 +28,7 @@ export function ProductsTable({ products, canWrite }: { products: Product[]; can
     });
   }
 
-  async function runLifecycle(productId: string, action: "duplicate" | "delete") {
+  async function runLifecycle(productId: string, action: "duplicate" | "delete" | "archive" | "restore") {
     const formData = new FormData();
     formData.set("productId", productId);
     formData.set("action", action);
@@ -183,6 +183,15 @@ export function ProductsTable({ products, canWrite }: { products: Product[]; can
               </Button>
               {canWrite ? (
                 <>
+                  {row.status === "archived" ? (
+                    <Button size="sm" variant="ghost" disabled={pending} onClick={() => runLifecycle(row.id, "restore")}>
+                      Restore
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="ghost" disabled={pending} onClick={() => runLifecycle(row.id, "archive")}>
+                      Archive
+                    </Button>
+                  )}
                   <Button size="sm" variant="ghost" disabled={pending} onClick={() => runLifecycle(row.id, "duplicate")}>
                     Duplicate
                   </Button>

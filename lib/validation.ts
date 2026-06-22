@@ -121,6 +121,11 @@ export const contactInquiryStatusSchema = z.object({
   status: z.enum(["new", "read", "replied", "closed"])
 });
 
+const optionalUrl = z.string().max(500).optional().refine(
+  (value) => !value || value === "" || /^https?:\/\/.+/.test(value),
+  "Enter a valid URL starting with http:// or https://"
+);
+
 export const siteSettingsSchema = z.object({
   businessName: z.string().min(2).max(160),
   businessLocation: z.string().min(5).max(240),
@@ -129,8 +134,25 @@ export const siteSettingsSchema = z.object({
   businessEmail: z.string().email(),
   paybillNumber: z.string().min(3).max(40),
   paybillAccount: z.string().min(2).max(80),
+  tillNumber: z.string().max(40).optional(),
+  pickupAddress: z.string().min(5).max(500),
+  operatingHours: z.string().min(3).max(500),
   siteUrl: z.string().url(),
-  businessDescription: z.string().min(10).max(500)
+  businessDescription: z.string().min(10).max(500),
+  socialFacebook: optionalUrl,
+  socialInstagram: optionalUrl,
+  socialTiktok: optionalUrl,
+  socialX: optionalUrl,
+  socialYoutube: optionalUrl,
+  socialLinkedin: optionalUrl
+});
+
+export const deleteInquirySchema = z.object({
+  inquiryId: z.string().min(1)
+});
+
+export const generateReceiptSchema = z.object({
+  orderId: z.string().min(1)
 });
 
 export const userRoleSchema = z.object({

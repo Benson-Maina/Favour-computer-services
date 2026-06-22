@@ -14,7 +14,17 @@ import { getOrderPaymentStatus } from "@/lib/admin-data";
 import type { Order, Payment } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
 
-export function OrdersTable({ orders, payments, canWrite }: { orders: Order[]; payments: Payment[]; canWrite: boolean }) {
+export function OrdersTable({
+  orders,
+  payments,
+  canWrite,
+  initialSearch = ""
+}: {
+  orders: Order[];
+  payments: Payment[];
+  canWrite: boolean;
+  initialSearch?: string;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
@@ -126,6 +136,7 @@ export function OrdersTable({ orders, payments, canWrite }: { orders: Order[]; p
         }
       ]}
       emptyTitle="No orders yet."
+      initialSearch={initialSearch}
     />
   );
 }
