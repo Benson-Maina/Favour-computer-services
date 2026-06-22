@@ -1,8 +1,8 @@
 "use client";
 
+import { useAuth } from "@clerk/nextjs";
 import { createContext, useContext, useEffect, useMemo, useState, useRef } from "react";
 import { toast } from "sonner";
-import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import type { Product } from "@/lib/types";
 
 export type CartItem = {
@@ -42,78 +42,47 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const syncInProgressRef = useRef(false);
+  const { isLoaded, isSignedIn } = useAuth();
 
   useEffect(() => {
     setHydrated(true);
   }, []);
 
   useEffect(() => {
-    if (!hydrated) return;
-    const supabase = createBrowserSupabaseClient();
-    if (!supabase) return;
-    
-    supabase.auth.getUser().then(async ({ data }) => {
-      if (!data.user) return;
-      if (items.length === 0) {
-        try {
-          const { data: rows, error } = await supabase.from("cart_items").select("payload").eq("user_id", data.user.id);
-          if (!error && rows?.length) {
-            const savedItems = rows.map((row) => row.payload as CartItem).filter(Boolean);
-            if (savedItems.length) setItems(savedItems);
-          }
-        } catch (err) {
-          console.error("Failed to load cart from Supabase:", err);
+    if (!hydrated || !isLoaded || !isSignedIn) return;
+
+    fetch("/api/cart")
+      .then((response) => response.json())
+      .then((data) => {
+        if (items.length === 0 && Array.isArray(data.items) && data.items.length) {
+          setItems(sanitizeItems(data.items));
         }
-      }
-    });
-  }, [hydrated]);
+      })
+      .catch((err) => console.error("Failed to load cart:", err));
+  }, [hydrated, isLoaded, isSignedIn]);
 
   useEffect(() => {
-    if (!hydrated || syncInProgressRef.current) return;
-    
-    // Clear any pending sync
-    if (syncTimeoutRef.current) {
-      clearTimeout(syncTimeoutRef.current);
-    }
+    if (!hydrated || !isLoaded || !isSignedIn || syncInProgressRef.current) return;
 
-    // Debounce sync to prevent too frequent updates
+    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+
     syncTimeoutRef.current = setTimeout(() => {
-      const supabase = createBrowserSupabaseClient();
-      if (!supabase) return;
-
       syncInProgressRef.current = true;
-      
-      supabase.auth.getUser().then(async ({ data }) => {
-        if (!data.user) {
+      fetch("/api/cart", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items })
+      })
+        .catch((err) => console.error("Failed to sync cart:", err))
+        .finally(() => {
           syncInProgressRef.current = false;
-          return;
-        }
-
-        try {
-          await supabase.from("cart_items").delete().eq("user_id", data.user.id);
-          
-          if (items.length > 0) {
-            await supabase.from("cart_items").insert(items.map((item) => ({
-              user_id: data.user.id,
-              product_id: item.productId,
-              quantity: item.quantity,
-              payload: item
-            })));
-          }
-        } catch (err) {
-          console.error("Failed to sync cart to Supabase:", err);
-        } finally {
-          syncInProgressRef.current = false;
-        }
-      });
+        });
     }, 500);
 
     return () => {
-      if (syncTimeoutRef.current) {
-        clearTimeout(syncTimeoutRef.current);
-      }
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     };
-  }, [hydrated, items]);
+  }, [hydrated, isLoaded, isSignedIn, items]);
 
   const value = useMemo<CartContextValue>(() => {
     const updateQuantity = (productId: string, quantity: number) => {

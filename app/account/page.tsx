@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { LogOut, MapPin, Package, UserRound } from "lucide-react";
-import { deleteAddress, logoutCustomer, saveAddress, saveProfile } from "@/app/actions";
+import { CalendarDays, LogOut, MapPin, Package, Shield, UserRound } from "lucide-react";
+import { SignOutButton } from "@clerk/nextjs";
+import { deleteAddress, saveAddress, saveProfile } from "@/app/actions";
 import { ActionForm } from "@/components/action-form-status";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
+import { requireUser, getUserDisplayName, getUserPhone, getUserEmail } from "@/lib/auth";
 
 export const metadata: Metadata = {
   title: "Customer Account",
@@ -26,37 +26,35 @@ function bool(value: unknown) {
 }
 
 export default async function AccountPage() {
-  const serverSupabase = await createClient();
-  const { data: userData } = serverSupabase ? await serverSupabase.auth.getUser() : { data: { user: null } };
-  if (!userData.user) redirect("/account/login?next=/account");
-
+  const { userId, user } = await requireUser();
   const supabase = createAdminClient();
   const [profileResult, addressesResult] = supabase
     ? await Promise.all([
-        supabase.from("users").select("*").eq("id", userData.user.id).single(),
-        supabase.from("addresses").select("*").eq("user_id", userData.user.id).order("created_at", { ascending: false })
+        supabase.from("users").select("*").eq("id", userId).maybeSingle(),
+        supabase.from("addresses").select("*").eq("user_id", userId).order("created_at", { ascending: false })
       ])
     : [{ data: null }, { data: [] }];
 
   const profile = (profileResult.data ?? {}) as Row;
   const addresses = (addressesResult.data ?? []) as Row[];
-  const fullName = text(profile.full_name, text(userData.user.user_metadata?.full_name, ""));
-  const phone = text(profile.phone, text(userData.user.user_metadata?.phone, ""));
+  const fullName = text(profile.full_name, getUserDisplayName(user));
+  const phone = text(profile.phone, getUserPhone(user));
+  const email = getUserEmail(user);
 
   return (
     <section className="container py-12">
       <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm font-bold uppercase text-primary">Customer Account</p>
-          <h1 className="text-4xl font-black">Profile & Orders</h1>
-          <p className="mt-2 text-muted-foreground">Manage your customer details, delivery addresses, and order history.</p>
+          <h1 className="text-4xl font-black">Account Dashboard</h1>
+          <p className="mt-2 text-muted-foreground">Manage your profile, delivery addresses, orders, and bookings.</p>
         </div>
-        <form action={logoutCustomer}>
-          <Button variant="outline"><LogOut className="mr-2 size-4" />Logout</Button>
-        </form>
+        <SignOutButton redirectUrl="/">
+          <Button variant="outline"><LogOut className="mr-2 size-4" />Sign Out</Button>
+        </SignOutButton>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
+      <div className="grid gap-6 lg:grid-cols-3">
         <Card>
           <CardContent className="p-6">
             <div className="mb-4 flex items-center gap-2">
@@ -65,7 +63,7 @@ export default async function AccountPage() {
             </div>
             <ActionForm action={saveProfile} buttonLabel="Save Profile">
               <label className="grid gap-2 text-sm font-medium">Full name<Input name="fullName" defaultValue={fullName} required minLength={2} /></label>
-              <label className="grid gap-2 text-sm font-medium">Email<Input value={userData.user.email ?? ""} disabled /></label>
+              <label className="grid gap-2 text-sm font-medium">Email<Input value={email} disabled /></label>
               <label className="grid gap-2 text-sm font-medium">Phone<Input name="phone" defaultValue={phone} minLength={7} /></label>
             </ActionForm>
           </CardContent>
@@ -77,11 +75,35 @@ export default async function AccountPage() {
               <Package className="size-5 text-primary" />
               <h2 className="text-xl font-bold">Orders</h2>
             </div>
-            <p className="text-sm text-muted-foreground">View order status, payment status, totals, and line items for purchases made while signed in.</p>
+            <p className="text-sm text-muted-foreground">View order status, payment status, totals, and line items.</p>
             <Button asChild className="mt-5 w-full"><Link href="/account/orders">View Orders</Link></Button>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardContent className="p-6">
+            <div className="mb-4 flex items-center gap-2">
+              <CalendarDays className="size-5 text-primary" />
+              <h2 className="text-xl font-bold">Bookings</h2>
+            </div>
+            <p className="text-sm text-muted-foreground">Track CCTV installation and live streaming booking requests.</p>
+            <Button asChild className="mt-5 w-full" variant="outline"><Link href="/account/bookings">View Bookings</Link></Button>
+          </CardContent>
+        </Card>
       </div>
+
+      <Card className="mt-6">
+        <CardContent className="flex flex-wrap items-center justify-between gap-4 p-6">
+          <div className="flex items-center gap-2">
+            <Shield className="size-5 text-primary" />
+            <div>
+              <h2 className="text-xl font-bold">Password & Security</h2>
+              <p className="text-sm text-muted-foreground">Update your password, email, and security settings.</p>
+            </div>
+          </div>
+          <Button asChild variant="outline"><Link href="/account/security">Manage Security</Link></Button>
+        </CardContent>
+      </Card>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
         <Card>

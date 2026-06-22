@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
 import { formatCurrency } from "@/lib/utils";
 
 export const metadata: Metadata = {
@@ -34,17 +34,15 @@ function arrayValue(value: unknown) {
 
 export default async function OrderDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const serverSupabase = await createClient();
-  const { data: userData } = serverSupabase ? await serverSupabase.auth.getUser() : { data: { user: null } };
+  const { userId } = await requireUser();
   const supabase = createAdminClient();
-  if (!userData.user) redirect(`/account/login?next=/account/orders/${id}`);
   if (!supabase) notFound();
 
   const { data: order } = await supabase
     .from("orders")
     .select("*, order_items(quantity,unit_price, products(name,slug,images,product_images(public_url,sort_order)))")
     .eq("id", id)
-    .eq("user_id", userData.user.id)
+    .eq("user_id", userId)
     .single();
 
   if (!order) notFound();

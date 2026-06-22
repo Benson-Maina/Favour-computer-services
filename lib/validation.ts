@@ -92,35 +92,6 @@ export const productLifecycleSchema = z.object({
   action: z.enum(["delete", "archive", "restore", "duplicate"])
 });
 
-export const authLoginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(6).max(200),
-  next: z.string().optional()
-});
-
-export const authRegisterSchema = z.object({
-  fullName: z.string().min(2).max(120),
-  phone: z.string().min(7).max(30).optional(),
-  email: z.string().email(),
-  password: z.string().min(8).max(200),
-  confirmPassword: z.string().min(8).max(200)
-}).refine((value) => value.password === value.confirmPassword, {
-  message: "Passwords do not match.",
-  path: ["confirmPassword"]
-});
-
-export const passwordResetSchema = z.object({
-  email: z.string().email()
-});
-
-export const passwordUpdateSchema = z.object({
-  password: z.string().min(8).max(200),
-  confirmPassword: z.string().min(8).max(200)
-}).refine((value) => value.password === value.confirmPassword, {
-  message: "Passwords do not match.",
-  path: ["confirmPassword"]
-});
-
 export const profileSchema = z.object({
   fullName: z.string().min(2).max(120),
   phone: z.string().min(7).max(30).optional()

@@ -1,12 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { PackageSearch } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
 import { formatCurrency } from "@/lib/utils";
 
 export const metadata: Metadata = {
@@ -25,12 +24,10 @@ function numberValue(value: unknown) {
 }
 
 export default async function OrdersPage() {
-  const serverSupabase = await createClient();
-  const { data: userData } = serverSupabase ? await serverSupabase.auth.getUser() : { data: { user: null } };
-  if (!userData.user) redirect("/account/login?next=/account/orders");
+  const { userId } = await requireUser();
   const supabase = createAdminClient();
-  const { data } = supabase && userData.user
-    ? await supabase.from("orders").select("*, order_items(id)").eq("user_id", userData.user.id).order("created_at", { ascending: false })
+  const { data } = supabase
+    ? await supabase.from("orders").select("*, order_items(id)").eq("user_id", userId).order("created_at", { ascending: false })
     : { data: [] };
   const orders = data ?? [];
 
@@ -39,7 +36,7 @@ export default async function OrdersPage() {
       <section className="container py-16 text-center">
         <PackageSearch className="mx-auto size-12 text-primary" />
         <h1 className="mt-4 text-4xl font-black">No orders yet</h1>
-        <p className="mt-2 text-muted-foreground">Signed-in checkout orders from Supabase will appear here.</p>
+        <p className="mt-2 text-muted-foreground">Orders placed while signed in will appear here.</p>
         <Button asChild className="mt-6"><Link href="/shop">Shop Products</Link></Button>
       </section>
     );

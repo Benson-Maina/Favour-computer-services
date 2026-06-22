@@ -1,7 +1,6 @@
 import Link from "next/link";
-import { UserRound } from "lucide-react";
 import { getBusinessSettings, getCategories, getProducts } from "@/lib/data";
-import { Button } from "@/components/ui/button";
+import { AccountHeaderButton } from "@/components/account-header-button";
 import { CartIconLink } from "@/components/cart-icon-link";
 import { MobileMenu } from "@/components/mobile-menu";
 import { SearchPanel } from "@/components/search-panel";
@@ -42,9 +41,7 @@ export async function SiteHeader() {
         <div className="flex items-center gap-1">
           <SearchPanel products={products} />
           <CartIconLink />
-          <Button asChild variant="ghost" size="icon" aria-label="Account">
-            <Link href="/account"><UserRound className="size-5" /></Link>
-          </Button>
+          <AccountHeaderButton />
           <ThemeToggle />
           <MobileMenu links={nav} />
         </div>

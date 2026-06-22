@@ -12,7 +12,7 @@ create type return_status as enum ('return_requested', 'under_review', 'approved
 create type shipping_status as enum ('not_required', 'pending', 'shipped', 'delivered');
 
 create table public.users (
-  id uuid primary key references auth.users(id) on delete cascade,
+  id text primary key,
   full_name text not null,
   phone text,
   role user_role not null default 'customer',
@@ -92,14 +92,14 @@ create table public.inventory_movements (
   quantity_change integer not null check (quantity_change <> 0),
   quantity_after integer,
   reason text not null,
-  actor_id uuid references public.users(id),
+  actor_id text references public.users(id),
   actor_name text,
   created_at timestamptz not null default now()
 );
 
 create table public.addresses (
   id uuid primary key default uuid_generate_v4(),
-  user_id uuid references public.users(id) on delete cascade,
+  user_id text references public.users(id) on delete cascade,
   label text not null,
   recipient_name text not null,
   phone text not null,
@@ -121,7 +121,7 @@ create table public.cart_items (
 
 create table public.orders (
   id uuid primary key default uuid_generate_v4(),
-  user_id uuid references public.users(id),
+  user_id text references public.users(id),
   customer_name text not null,
   customer_email text not null,
   customer_phone text not null,
@@ -143,7 +143,7 @@ create table public.order_timeline (
   id uuid primary key default uuid_generate_v4(),
   order_id uuid not null references public.orders(id) on delete cascade,
   label text not null,
-  actor_id uuid references public.users(id),
+  actor_id text references public.users(id),
   actor_name text,
   created_at timestamptz not null default now()
 );
@@ -153,7 +153,7 @@ create table public.order_notes (
   order_id uuid not null references public.orders(id) on delete cascade,
   note text not null,
   notify_customer boolean not null default false,
-  actor_id uuid references public.users(id),
+  actor_id text references public.users(id),
   created_at timestamptz not null default now()
 );
 
@@ -178,7 +178,7 @@ create table public.payments (
   verified boolean not null default false,
   rejected boolean not null default false,
   rejection_reason text,
-  verified_by uuid references public.users(id),
+  verified_by text references public.users(id),
   verified_at timestamptz,
   created_at timestamptz not null default now()
 );
@@ -189,7 +189,7 @@ create table public.payment_logs (
   order_id uuid not null references public.orders(id) on delete cascade,
   action payment_log_action not null,
   note text,
-  actor_id uuid references public.users(id),
+  actor_id text references public.users(id),
   actor_name text,
   created_at timestamptz not null default now()
 );
@@ -240,7 +240,7 @@ create table public.returns (
 
 create table public.audit_logs (
   id uuid primary key default uuid_generate_v4(),
-  user_id uuid references public.users(id),
+  user_id text references public.users(id),
   user_name text,
   action text not null,
   entity text not null,
@@ -263,7 +263,7 @@ create table public.bookings (
 create table public.reviews (
   id uuid primary key default uuid_generate_v4(),
   product_id uuid references public.products(id) on delete cascade,
-  user_id uuid references public.users(id),
+  user_id text references public.users(id),
   rating integer not null check (rating between 1 and 5),
   title text,
   body text,
@@ -309,7 +309,7 @@ create table public.blog_posts (
 create table public.search_logs (
   id uuid primary key default uuid_generate_v4(),
   term text not null,
-  user_id uuid references public.users(id),
+  user_id text references public.users(id),
   created_at timestamptz not null default now()
 );
 
@@ -367,34 +367,10 @@ as $$
   select exists (
     select 1
     from public.users
-    where id = auth.uid()
+    where id = coalesce(auth.jwt() ->> 'sub', auth.uid()::text)
       and role in ('super_admin', 'admin', 'staff')
   );
 $$;
-
-create or replace function public.handle_new_auth_user()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  insert into public.users (id, full_name, phone, role)
-  values (
-    new.id,
-    coalesce(new.raw_user_meta_data ->> 'full_name', split_part(new.email, '@', 1), 'Customer'),
-    nullif(new.raw_user_meta_data ->> 'phone', ''),
-    'customer'
-  )
-  on conflict (id) do nothing;
-  return new;
-end;
-$$;
-
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
-after insert on auth.users
-for each row execute function public.handle_new_auth_user();
 
 alter table public.users enable row level security;
 alter table public.addresses enable row level security;
@@ -418,34 +394,34 @@ alter table public.contact_inquiries enable row level security;
 alter table public.email_delivery_logs enable row level security;
 alter table public.site_settings enable row level security;
 
-create policy "Users can view own profile" on public.users for select using (auth.uid() = id);
-create policy "Users can update own profile" on public.users for update using (auth.uid() = id);
+create policy "Users can view own profile" on public.users for select using (coalesce(auth.jwt() ->> 'sub', auth.uid()::text) = id);
+create policy "Users can update own profile" on public.users for update using (coalesce(auth.jwt() ->> 'sub', auth.uid()::text) = id);
 create policy "Admins can manage users" on public.users for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
-create policy "Users can manage own addresses" on public.addresses for all using (auth.uid() = user_id);
+create policy "Users can manage own addresses" on public.addresses for all using (coalesce(auth.jwt() ->> 'sub', auth.uid()::text) = user_id);
 create policy "Admins can manage addresses" on public.addresses for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
-create policy "Users can manage own cart" on public.cart_items for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
-create policy "Users can view own orders" on public.orders for select using (auth.uid() = user_id);
+create policy "Users can manage own cart" on public.cart_items for all using (coalesce(auth.jwt() ->> 'sub', auth.uid()::text) = user_id) with check (coalesce(auth.jwt() ->> 'sub', auth.uid()::text) = user_id);
+create policy "Users can view own orders" on public.orders for select using (coalesce(auth.jwt() ->> 'sub', auth.uid()::text) = user_id);
 create policy "Admins can manage orders" on public.orders for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
-create policy "Users can view own order items" on public.order_items for select using (exists (select 1 from public.orders where orders.id = order_items.order_id and orders.user_id = auth.uid()));
+create policy "Users can view own order items" on public.order_items for select using (exists (select 1 from public.orders where orders.id = order_items.order_id and orders.user_id = coalesce(auth.jwt() ->> 'sub', auth.uid()::text)));
 create policy "Admins can manage order items" on public.order_items for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
-create policy "Users can view own payments" on public.payments for select using (exists (select 1 from public.orders where orders.id = payments.order_id and orders.user_id = auth.uid()));
+create policy "Users can view own payments" on public.payments for select using (exists (select 1 from public.orders where orders.id = payments.order_id and orders.user_id = coalesce(auth.jwt() ->> 'sub', auth.uid()::text)));
 create policy "Admins can manage payments" on public.payments for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
-create policy "Users can view own order timeline" on public.order_timeline for select using (exists (select 1 from public.orders where orders.id = order_timeline.order_id and orders.user_id = auth.uid()));
+create policy "Users can view own order timeline" on public.order_timeline for select using (exists (select 1 from public.orders where orders.id = order_timeline.order_id and orders.user_id = coalesce(auth.jwt() ->> 'sub', auth.uid()::text)));
 create policy "Admins can manage order timeline" on public.order_timeline for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
-create policy "Users can view own receipts" on public.receipts for select using (exists (select 1 from public.orders where orders.id = receipts.order_id and orders.user_id = auth.uid()));
+create policy "Users can view own receipts" on public.receipts for select using (exists (select 1 from public.orders where orders.id = receipts.order_id and orders.user_id = coalesce(auth.jwt() ->> 'sub', auth.uid()::text)));
 create policy "Admins can manage receipts" on public.receipts for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
-create policy "Users can view own invoices" on public.invoices for select using (exists (select 1 from public.orders where orders.id = invoices.order_id and orders.user_id = auth.uid()));
+create policy "Users can view own invoices" on public.invoices for select using (exists (select 1 from public.orders where orders.id = invoices.order_id and orders.user_id = coalesce(auth.jwt() ->> 'sub', auth.uid()::text)));
 create policy "Admins can manage invoices" on public.invoices for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
-create policy "Users can view own shipping records" on public.shipping_records for select using (exists (select 1 from public.orders where orders.id = shipping_records.order_id and orders.user_id = auth.uid()));
+create policy "Users can view own shipping records" on public.shipping_records for select using (exists (select 1 from public.orders where orders.id = shipping_records.order_id and orders.user_id = coalesce(auth.jwt() ->> 'sub', auth.uid()::text)));
 create policy "Admins can manage shipping records" on public.shipping_records for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
-create policy "Users can view own returns" on public.returns for select using (exists (select 1 from public.orders where orders.id = returns.order_id and orders.user_id = auth.uid()));
+create policy "Users can view own returns" on public.returns for select using (exists (select 1 from public.orders where orders.id = returns.order_id and orders.user_id = coalesce(auth.jwt() ->> 'sub', auth.uid()::text)));
 create policy "Admins can manage returns" on public.returns for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
-create policy "Users can create own reviews" on public.reviews for insert with check (auth.uid() = user_id);
+create policy "Users can create own reviews" on public.reviews for insert with check (coalesce(auth.jwt() ->> 'sub', auth.uid()::text) = user_id);
 create policy "Public can view approved reviews" on public.reviews for select using (approved = true);
 create policy "Admins can manage reviews" on public.reviews for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
 create policy "Admins can manage inventory movements" on public.inventory_movements for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
 create policy "Admins can manage order notes" on public.order_notes for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
-create policy "Users can view notified own order notes" on public.order_notes for select using (notify_customer and exists (select 1 from public.orders where orders.id = order_notes.order_id and orders.user_id = auth.uid()));
+create policy "Users can view notified own order notes" on public.order_notes for select using (notify_customer and exists (select 1 from public.orders where orders.id = order_notes.order_id and orders.user_id = coalesce(auth.jwt() ->> 'sub', auth.uid()::text)));
 create policy "Admins can manage payment logs" on public.payment_logs for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());
 create policy "Public can view product images" on public.product_images for select using (true);
 create policy "Admins can manage product images" on public.product_images for all using (public.current_user_is_admin()) with check (public.current_user_is_admin());

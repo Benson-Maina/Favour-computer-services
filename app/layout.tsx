@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 import { business, getBusinessSettings } from "@/lib/data";
 import { SiteFooter } from "@/components/site-footer";
@@ -53,19 +54,21 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   };
 
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body>
-        <ThemeProvider>
-          <CartProvider>
-            <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }} />
-            <SiteHeader />
-            <main>{children}</main>
-            <SiteFooter />
-            <WhatsappFloat />
-            <Toaster richColors position="top-right" />
-          </CartProvider>
-        </ThemeProvider>
-      </body>
-    </html>
+    <ClerkProvider>
+      <html lang="en" suppressHydrationWarning>
+        <body>
+          <ThemeProvider>
+            <CartProvider>
+              <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }} />
+              <SiteHeader />
+              <main>{children}</main>
+              <SiteFooter />
+              <WhatsappFloat />
+              <Toaster richColors position="top-right" />
+            </CartProvider>
+          </ThemeProvider>
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }

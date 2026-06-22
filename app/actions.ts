@@ -1,13 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { requirePermission } from "@/lib/admin-auth";
+import { requireUser, getCurrentUserId } from "@/lib/auth";
 import { business, getBusinessSettings } from "@/lib/data";
 import { adminEmailHtml, adminNotificationEmail, sendTransactionalEmail } from "@/lib/email";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
-import { addressSchema, authLoginSchema, authRegisterSchema, bookingSchema, bookingStatusSchema, checkoutSchema, contactInquiryStatusSchema, contactSchema, deleteAddressSchema, inventoryAdjustmentSchema, newsletterSchema, orderStatusSchema, passwordResetSchema, passwordUpdateSchema, paymentReviewSchema, productAdminSchema, productInquirySchema, productLifecycleSchema, profileSchema, siteSettingsSchema } from "@/lib/validation";
+import { addressSchema, bookingSchema, bookingStatusSchema, checkoutSchema, contactInquiryStatusSchema, contactSchema, deleteAddressSchema, inventoryAdjustmentSchema, newsletterSchema, orderStatusSchema, paymentReviewSchema, productAdminSchema, productInquirySchema, productLifecycleSchema, profileSchema, siteSettingsSchema } from "@/lib/validation";
 
 type ActionState = { 
   ok: boolean; 
@@ -42,23 +41,20 @@ function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
 
-async function requireUser() {
-  const supabase = await createClient();
-  if (!supabase) throw new Error("Authentication is not configured.");
-  const { data, error } = await supabase.auth.getUser();
-  if (error || !data.user) throw new Error("You must be signed in.");
-  return { supabase, user: data.user };
-}
-
 async function ensureUserProfile(userId: string, fullName: string, phone?: string) {
   const supabase = createAdminClient();
   if (!supabase) return;
-  await supabase.from("users").upsert({
+  const { data: existing } = await supabase.from("users").select("role").eq("id", userId).maybeSingle();
+  if (existing) {
+    await supabase.from("users").update({ full_name: fullName, phone: phone || null }).eq("id", userId);
+    return;
+  }
+  await supabase.from("users").insert({
     id: userId,
     full_name: fullName,
     phone: phone || null,
     role: "customer"
-  }, { onConflict: "id" });
+  });
 }
 
 async function uploadStorageFile(bucket: string, folder: string, file: FormDataEntryValue | null) {
@@ -101,85 +97,6 @@ async function removeStorageObjects(bucket: string, values: string[]) {
   if (error) console.error(`${bucket} storage deletion error:`, error);
 }
 
-export async function loginCustomer(_: ActionState, formData: FormData): Promise<ActionState> {
-  const parsed = authLoginSchema.safeParse({
-    email: getString(formData, "email"),
-    password: getString(formData, "password"),
-    next: getString(formData, "next")
-  });
-  if (!parsed.success) return { ok: false, message: "Enter a valid email and password." };
-
-  const supabase = await createClient();
-  if (!supabase) return { ok: false, message: "Authentication is not configured." };
-  const { error } = await supabase.auth.signInWithPassword({
-    email: parsed.data.email,
-    password: parsed.data.password
-  });
-  if (error) return { ok: false, message: error.message };
-  redirect(parsed.data.next || "/account");
-}
-
-export async function registerCustomer(_: ActionState, formData: FormData): Promise<ActionState> {
-  const parsed = authRegisterSchema.safeParse({
-    fullName: getString(formData, "fullName"),
-    phone: getString(formData, "phone") || undefined,
-    email: getString(formData, "email"),
-    password: getString(formData, "password"),
-    confirmPassword: getString(formData, "confirmPassword")
-  });
-  if (!parsed.success) return { ok: false, message: "Check the registration details and password confirmation." };
-
-  const supabase = await createClient();
-  if (!supabase) return { ok: false, message: "Authentication is not configured." };
-  const redirectTo = `${process.env.NEXT_PUBLIC_SITE_URL ?? business.siteUrl}/auth/callback?next=/account`;
-  const { data, error } = await supabase.auth.signUp({
-    email: parsed.data.email,
-    password: parsed.data.password,
-    options: {
-      emailRedirectTo: redirectTo,
-      data: {
-        full_name: parsed.data.fullName,
-        phone: parsed.data.phone || ""
-      }
-    }
-  });
-  if (error) return { ok: false, message: error.message };
-  if (data.user) await ensureUserProfile(data.user.id, parsed.data.fullName, parsed.data.phone);
-  return { ok: true, message: data.session ? "Account created and signed in." : "Account created. Check your email to verify your account before signing in." };
-}
-
-export async function sendPasswordReset(_: ActionState, formData: FormData): Promise<ActionState> {
-  const parsed = passwordResetSchema.safeParse({ email: getString(formData, "email") });
-  if (!parsed.success) return { ok: false, message: "Enter a valid email address." };
-
-  const supabase = await createClient();
-  if (!supabase) return { ok: false, message: "Authentication is not configured." };
-  const redirectTo = `${process.env.NEXT_PUBLIC_SITE_URL ?? business.siteUrl}/auth/update-password`;
-  const { error } = await supabase.auth.resetPasswordForEmail(parsed.data.email, { redirectTo });
-  if (error) return { ok: false, message: error.message };
-  return { ok: true, message: "Password reset email sent." };
-}
-
-export async function updatePassword(_: ActionState, formData: FormData): Promise<ActionState> {
-  const parsed = passwordUpdateSchema.safeParse({
-    password: getString(formData, "password"),
-    confirmPassword: getString(formData, "confirmPassword")
-  });
-  if (!parsed.success) return { ok: false, message: "Passwords must match and be at least 8 characters." };
-
-  const supabase = await createClient();
-  if (!supabase) return { ok: false, message: "Authentication is not configured." };
-  const { error } = await supabase.auth.updateUser({ password: parsed.data.password });
-  if (error) return { ok: false, message: error.message };
-  return { ok: true, message: "Password updated. You can now continue to your account." };
-}
-
-export async function logoutCustomer(): Promise<void> {
-  const supabase = await createClient();
-  if (supabase) await supabase.auth.signOut();
-  redirect("/account/login");
-}
-
 export async function saveProfile(_: ActionState, formData: FormData): Promise<ActionState> {
   const parsed = profileSchema.safeParse({
     fullName: getString(formData, "fullName"),
@@ -187,14 +104,16 @@ export async function saveProfile(_: ActionState, formData: FormData): Promise<A
   });
   if (!parsed.success) return { ok: false, message: "Enter a valid name and phone number." };
 
-  const { user } = await requireUser();
+  const { userId } = await requireUser();
   const supabase = createAdminClient();
   if (!supabase) return { ok: false, message: "Service unavailable. Please try again." };
+
+  const { data: existing } = await supabase.from("users").select("role").eq("id", userId).maybeSingle();
   const { error } = await supabase.from("users").upsert({
-    id: user.id,
+    id: userId,
     full_name: parsed.data.fullName,
     phone: parsed.data.phone || null,
-    role: "customer"
+    role: existing?.role ?? "customer"
   }, { onConflict: "id" });
   if (error) return { ok: false, message: "Profile could not be saved." };
   revalidatePath("/account");
@@ -213,12 +132,12 @@ export async function saveAddress(_: ActionState, formData: FormData): Promise<A
   });
   if (!parsed.success) return { ok: false, message: "Address details are incomplete." };
 
-  const { user } = await requireUser();
+  const { userId } = await requireUser();
   const supabase = createAdminClient();
   if (!supabase) return { ok: false, message: "Service unavailable. Please try again." };
-  if (parsed.data.isDefault) await supabase.from("addresses").update({ is_default: false }).eq("user_id", user.id);
+  if (parsed.data.isDefault) await supabase.from("addresses").update({ is_default: false }).eq("user_id", userId);
   const payload = {
-    user_id: user.id,
+    user_id: userId,
     label: parsed.data.label,
     recipient_name: parsed.data.recipientName,
     phone: parsed.data.phone,
@@ -227,7 +146,7 @@ export async function saveAddress(_: ActionState, formData: FormData): Promise<A
     is_default: Boolean(parsed.data.isDefault)
   };
   const result = parsed.data.id
-    ? await supabase.from("addresses").update(payload).eq("id", parsed.data.id).eq("user_id", user.id)
+    ? await supabase.from("addresses").update(payload).eq("id", parsed.data.id).eq("user_id", userId)
     : await supabase.from("addresses").insert(payload);
   if (result.error) return { ok: false, message: "Address could not be saved." };
   revalidatePath("/account");
@@ -237,10 +156,10 @@ export async function saveAddress(_: ActionState, formData: FormData): Promise<A
 export async function deleteAddress(_: ActionState, formData: FormData): Promise<ActionState> {
   const parsed = deleteAddressSchema.safeParse({ id: getString(formData, "id") });
   if (!parsed.success) return { ok: false, message: "Invalid address." };
-  const { user } = await requireUser();
+  const { userId } = await requireUser();
   const supabase = createAdminClient();
   if (!supabase) return { ok: false, message: "Service unavailable. Please try again." };
-  const { error } = await supabase.from("addresses").delete().eq("id", parsed.data.id).eq("user_id", user.id);
+  const { error } = await supabase.from("addresses").delete().eq("id", parsed.data.id).eq("user_id", userId);
   if (error) return { ok: false, message: "Address could not be deleted." };
   revalidatePath("/account");
   return { ok: true, message: "Address deleted." };
@@ -462,13 +381,13 @@ export async function submitCheckout(_: ActionState, formData: FormData): Promis
       return { ok: false, message: "Service unavailable. Please try again." };
     }
 
-    const serverSupabase = await createClient();
-    const { data: userData } = serverSupabase ? await serverSupabase.auth.getUser() : { data: { user: null } };
+    const userId = await getCurrentUserId();
     const paymentProof = await uploadStorageFile("payments", `orders/${orderId}`, formData.get("paymentScreenshot"));
 
-    if (userData.user && parsed.data.address) {
+    if (userId && parsed.data.address) {
+      await ensureUserProfile(userId, parsed.data.name, parsed.data.phone);
       await supabase.from("addresses").insert({
-        user_id: userData.user.id,
+        user_id: userId,
         label: parsed.data.deliveryMethod,
         recipient_name: parsed.data.name,
         phone: parsed.data.phone,
@@ -481,7 +400,7 @@ export async function submitCheckout(_: ActionState, formData: FormData): Promis
     // Create order record
     const { error: orderError } = await supabase.from("orders").insert({
       id: orderId,
-      user_id: userData.user?.id,
+      user_id: userId,
       customer_name: parsed.data.name,
       customer_email: parsed.data.email,
       customer_phone: parsed.data.phone,
