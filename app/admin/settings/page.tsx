@@ -6,13 +6,14 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { requireAdminPage } from "@/lib/admin-auth";
 import { getBusinessSettings } from "@/lib/data";
-import { socialPlatforms } from "@/lib/social-links";
+import { hasSocialLinks, socialPlatforms } from "@/lib/social-links";
 
 export const metadata: Metadata = { title: "Settings" };
 
 export default async function AdminSettingsPage() {
   await requireAdminPage("settings:write");
   const business = await getBusinessSettings();
+  const hasLinks = hasSocialLinks(business.socialLinks);
 
   return (
     <div>
@@ -43,7 +44,12 @@ export default async function AdminSettingsPage() {
         </div>
 
         <div className="space-y-4 rounded-lg border border-border p-5">
-          <h2 className="font-semibold text-foreground">Social Media</h2>
+          <div className="flex items-center justify-between gap-4">
+            <h2 className="font-semibold text-foreground">Social Media</h2>
+            {!hasLinks ? (
+              <span className="rounded-full bg-yellow-100 px-2 py-1 text-xs font-semibold text-yellow-900">No links configured</span>
+            ) : null}
+          </div>
           <p className="text-sm text-muted-foreground">Leave blank to hide icons on the website.</p>
           {socialPlatforms.map(({ key, label }) => (
             <Input

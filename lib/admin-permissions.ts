@@ -71,6 +71,7 @@ export const rolePermissions: Record<AdminRole, Permission[]> = {
     "blog:read",
     "blog:write",
     "testimonials:write",
+    "settings:write",
     "receipts:read",
     "returns:write"
   ],

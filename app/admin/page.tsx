@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { AdminDashboardOverview } from "@/components/admin/admin-dashboard-overview";
-import { requireAdminPage } from "@/lib/admin-auth";
+import { getAdminPermissions, requireAdminPage } from "@/lib/admin-auth";
 import { loadDashboardMetrics } from "@/lib/admin-data";
 
 export const metadata: Metadata = {
@@ -10,6 +10,6 @@ export const metadata: Metadata = {
 
 export default async function AdminPage() {
   await requireAdminPage("dashboard:read");
-  const metrics = await loadDashboardMetrics();
-  return <AdminDashboardOverview metrics={metrics} />;
+  const [metrics, permissions] = await Promise.all([loadDashboardMetrics(), getAdminPermissions()]);
+  return <AdminDashboardOverview metrics={metrics} permissions={permissions} />;
 }

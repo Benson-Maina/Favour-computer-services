@@ -20,12 +20,26 @@ export const emptySocialLinks = (): SocialLinks => ({
   linkedin: ""
 });
 
+function parseJson(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
 export function parseSocialLinks(value: unknown): SocialLinks {
   const base = emptySocialLinks();
-  if (!value || typeof value !== "object" || Array.isArray(value)) return base;
-  const record = value as Record<string, unknown>;
+  if (!value) return base;
+
+  const record =
+    typeof value === "string"
+      ? parseJson(value)
+      : value;
+
+  if (!record || typeof record !== "object" || Array.isArray(record)) return base;
   for (const { key } of socialPlatforms) {
-    const url = record[key];
+    const url = (record as Record<string, unknown>)[key];
     if (typeof url === "string" && url.trim()) base[key] = url.trim();
   }
   return base;

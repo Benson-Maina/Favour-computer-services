@@ -2,27 +2,73 @@ import Link from "next/link";
 import { Boxes, Mail, MessageSquare, Package, ShoppingBag, TrendingUp, Users, Warehouse } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import type { DashboardMetrics } from "@/lib/admin-data";
+import type { Permission } from "@/lib/admin-permissions";
 import { formatCurrency } from "@/lib/utils";
 
 const cards = [
-  { key: "totalProducts", label: "Products", icon: Package, href: "/admin/products", format: (v: number) => String(v) },
-  { key: "totalOrders", label: "Orders", icon: ShoppingBag, href: "/admin/orders", format: (v: number) => String(v) },
-  { key: "totalRevenue", label: "Revenue", icon: TrendingUp, href: "/admin/payments", format: (v: number) => formatCurrency(v) },
-  { key: "inventoryAlerts", label: "Inventory Alerts", icon: Warehouse, href: "/admin/inventory?filter=alerts", format: (v: number) => String(v) },
-  { key: "newInquiries", label: "New Inquiries", icon: Mail, href: "/admin/inquiries?status=new", format: (v: number) => String(v) },
-  { key: "newBookings", label: "New Bookings", icon: MessageSquare, href: "/admin/bookings/cctv?status=new", format: (v: number) => String(v) }
+  {
+    key: "totalProducts",
+    label: "Products",
+    icon: Package,
+    href: "/admin/products",
+    permission: "products:read",
+    format: (v: number) => String(v)
+  },
+  {
+    key: "totalOrders",
+    label: "Orders",
+    icon: ShoppingBag,
+    href: "/admin/orders",
+    permission: "orders:read",
+    format: (v: number) => String(v)
+  },
+  {
+    key: "totalRevenue",
+    label: "Revenue",
+    icon: TrendingUp,
+    href: "/admin/payments",
+    permission: "payments:read",
+    format: (v: number) => formatCurrency(v)
+  },
+  {
+    key: "inventoryAlerts",
+    label: "Inventory Alerts",
+    icon: Warehouse,
+    href: "/admin/inventory?filter=alerts",
+    permission: "inventory:read",
+    format: (v: number) => String(v)
+  },
+  {
+    key: "newInquiries",
+    label: "New Inquiries",
+    icon: Mail,
+    href: "/admin/inquiries?status=new",
+    permission: "customers:read",
+    format: (v: number) => String(v)
+  },
+  {
+    key: "newBookings",
+    label: "New Bookings",
+    icon: MessageSquare,
+    href: "/admin/bookings/cctv?status=new",
+    permission: "bookings:read",
+    format: (v: number) => String(v)
+  }
 ] as const;
 
 const quickLinks = [
-  { label: "Products", href: "/admin/products", icon: Package },
-  { label: "Orders", href: "/admin/orders", icon: ShoppingBag },
-  { label: "Inventory", href: "/admin/inventory", icon: Warehouse },
-  { label: "Inquiries", href: "/admin/inquiries", icon: Mail },
-  { label: "Users", href: "/admin/users", icon: Users },
-  { label: "Settings", href: "/admin/settings", icon: Boxes }
+  { label: "Products", href: "/admin/products", icon: Package, permission: "products:read" },
+  { label: "Orders", href: "/admin/orders", icon: ShoppingBag, permission: "orders:read" },
+  { label: "Inventory", href: "/admin/inventory", icon: Warehouse, permission: "inventory:read" },
+  { label: "Inquiries", href: "/admin/inquiries", icon: Mail, permission: "customers:read" },
+  { label: "Users", href: "/admin/users", icon: Users, permission: "users:read" },
+  { label: "Settings", href: "/admin/settings", icon: Boxes, permission: "settings:write" }
 ] as const;
 
-export function AdminDashboardOverview({ metrics }: { metrics: DashboardMetrics }) {
+export function AdminDashboardOverview({ metrics, permissions }: { metrics: DashboardMetrics; permissions: Permission[] }) {
+  const visibleCards = cards.filter((card) => permissions.includes(card.permission));
+  const visibleQuickLinks = quickLinks.filter((link) => permissions.includes(link.permission));
+
   return (
     <div>
       <div className="mb-6">
@@ -31,7 +77,7 @@ export function AdminDashboardOverview({ metrics }: { metrics: DashboardMetrics 
         <p className="mt-1 text-sm text-muted-foreground">Real-time metrics from your store database.</p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {cards.map(({ key, label, icon: Icon, href, format }) => (
+        {visibleCards.map(({ key, label, icon: Icon, href, format }) => (
           <Link key={key} href={href} className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <Card className="h-full transition-shadow hover:shadow-md">
               <CardContent className="p-5">
@@ -51,7 +97,7 @@ export function AdminDashboardOverview({ metrics }: { metrics: DashboardMetrics 
               <p className="font-semibold text-foreground">Quick navigation</p>
               <p className="mt-1 text-sm text-muted-foreground">Jump directly to key management areas.</p>
               <div className="mt-4 flex flex-wrap gap-2">
-                {quickLinks.map(({ label, href, icon: Icon }) => (
+                {visibleQuickLinks.map(({ label, href, icon: Icon }) => (
                   <Link
                     key={href}
                     href={href}
