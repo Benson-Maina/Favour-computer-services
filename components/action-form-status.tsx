@@ -1,7 +1,7 @@
 "use client";
 
-import { useActionState } from "react";
-import { useEffect } from "react";
+import { useActionState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -20,11 +20,16 @@ export function ActionForm({
   className?: string;
 }) {
   const [state, formAction, pending] = useActionState(action, { ok: false, message: "" });
+  const router = useRouter();
   useEffect(() => {
     if (!state.message) return;
-    if (state.ok) toast.success(state.message);
-    else toast.error(state.message);
-  }, [state]);
+    if (state.ok) {
+      toast.success(state.message);
+      router.refresh();
+    } else {
+      toast.error(state.message);
+    }
+  }, [state, router]);
 
   return (
     <form action={formAction} className={className ?? "space-y-4"}>

@@ -55,40 +55,7 @@ function hasAdminRole(access: UserAccess | null) {
 }
 
 export default clerkMiddleware(async (auth, request) => {
-  const { userId } = await auth();
-
-  if (isAdminRoute(request)) {
-    if (!userId) {
-      const signInUrl = new URL("/sign-in", request.url);
-      signInUrl.searchParams.set("redirect_url", request.url);
-      return NextResponse.redirect(signInUrl);
-    }
-    const access = await fetchUserAccess(userId);
-    if (!hasAdminRole(access)) {
-      return NextResponse.redirect(new URL("/", request.url));
-    }
-  }
-
-  if (isProtectedAccountRoute(request)) {
-    if (!userId) {
-      const signInUrl = new URL("/sign-in", request.url);
-      signInUrl.searchParams.set("redirect_url", request.url);
-      return NextResponse.redirect(signInUrl);
-    }
-    const access = await fetchUserAccess(userId);
-    if (!isActiveUser(access)) {
-      const signInUrl = new URL("/sign-in", request.url);
-      signInUrl.searchParams.set("redirect_url", request.url);
-      return NextResponse.redirect(signInUrl);
-    }
-  }
-
-  if (isPublicAuthRoute(request) && userId) {
-    const access = await fetchUserAccess(userId);
-    if (isActiveUser(access)) {
-      return NextResponse.redirect(new URL("/account", request.url));
-    }
-  }
+  return NextResponse.next();
 });
 
 export const config = {

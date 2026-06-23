@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { filterNavGroups, type AdminNavGroup } from "@/lib/admin-nav";
 import type { Permission } from "@/lib/admin-permissions";
 import { cn } from "@/lib/utils";
@@ -24,7 +24,7 @@ export function AdminSidebar({
   badges?: BadgeCounts;
 }) {
   const pathname = usePathname();
-  const groups = filterNavGroups(permissions);
+  const groups = useMemo(() => filterNavGroups(permissions), [permissions]);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
